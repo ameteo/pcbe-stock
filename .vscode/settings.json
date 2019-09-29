@@ -1,0 +1,10 @@
+{
+    "java.test.config": [
+        {
+            "name": "java12",
+            "workingDirectory": "${workspaceFolder}",
+            "vmargs": [ "--enable-preview" ]
+        }
+    ],
+    "java.test.defaultConfig": "java12"
+}
