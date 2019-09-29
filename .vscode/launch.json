@@ -1,0 +1,12 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "CodeLens (Launch) - CLI",
+            "request": "launch",
+            "mainClass": "pcbe.stock.CLI",
+            "projectName": "stock",
+            "vmArgs": "--enable-preview"
+        }
+    ]
+}

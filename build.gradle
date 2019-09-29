@@ -1,0 +1,47 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'eclipse'
+}
+
+sourceCompatibility = JavaVersion.VERSION_12
+targetCompatibility = JavaVersion.VERSION_12
+
+repositories {
+    jcenter()
+}
+
+def junit_version = '5.5.2'
+dependencies {
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: junit_version
+
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: junit_version
+}
+
+application {
+    mainClassName = 'pcbe.stock.CLI'
+}
+
+compileJava {
+    options.compilerArgs += ['--enable-preview']
+}
+
+compileTestJava {
+    options.compilerArgs += ['--enable-preview']
+}
+
+test {
+    jvmArgs '--enable-preview'
+    useJUnitPlatform()
+}
+
+run {
+    standardInput = System.in
+    jvmArgs '--enable-preview'
+}
+
+// run 'gradle eclipseJdt` to enable java 12 preview features in Visual Studio Code 
+eclipse.jdt.file.withProperties { props ->
+    props['org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures']= 'enabled'
+    props['org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures']= 'ignore'
+}
