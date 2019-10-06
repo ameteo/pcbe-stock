@@ -8,6 +8,7 @@ import java.util.concurrent.Callable;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
+import pcbe.stock.model.request.RegisterRequest;
 
 public class StockClient implements Callable<String> {
     private final Logger logger = LogManager.getLogger();
@@ -36,6 +37,9 @@ public class StockClient implements Callable<String> {
     public String call() {
         if (!isConnected())
             throw new RuntimeException("Client " + id + " not connected.");
+        var registerResponse = requester.request(RegisterRequest.withId(id));
+        if (!registerResponse.isSuccessful())
+            logger.info("Client " + id + " failed to register with error: " + registerResponse.getError());
         return "Client " + id + " done";
     }
 }
