@@ -10,11 +10,20 @@ targetCompatibility = JavaVersion.VERSION_12
 repositories {
     jcenter()
 }
-
-def junit_version = '5.5.2'
 dependencies {
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: junit_version
+    def jersey_version = '2.29.1'
+    implementation group: 'org.glassfish.jersey', name: 'jersey-bom', version: jersey_version, ext: 'pom'
+    implementation group: 'org.glassfish.jersey.containers', name:'jersey-container-grizzly2-http', version: jersey_version
+    implementation group: 'org.glassfish.jersey.inject', name: 'jersey-hk2', version: jersey_version
 
+    def jaxb_version = '2.3.1'
+    implementation group: 'javax.xml.bind', name: 'jaxb-api', version: jaxb_version
+
+    def gson_version = '2.8.5'
+    implementation group: 'com.google.code.gson', name: 'gson', version: gson_version
+
+    def junit_version = '5.5.2'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: junit_version
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: junit_version
 }
 
