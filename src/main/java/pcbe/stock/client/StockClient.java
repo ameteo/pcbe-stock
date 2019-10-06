@@ -5,8 +5,12 @@ import static java.util.Objects.requireNonNull;
 
 import java.net.URI;
 import java.util.concurrent.Callable;
+import java.util.logging.Logger;
+
+import pcbe.log.LogManager;
 
 public class StockClient implements Callable<String> {
+    private final Logger logger = LogManager.getLogger();
     private Requester requester;
     private String id;
 
