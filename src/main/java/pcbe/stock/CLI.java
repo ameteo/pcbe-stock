@@ -15,6 +15,7 @@ public class CLI {
     public static void main(String[] args) throws IOException {
         var stockServer = new StockServer(SERVER_URI);
         var clients = StockClientGenerator.generateClients();
+        clients.forEach(client -> client.connectTo(SERVER_URI));
         var executor = Executors.newCachedThreadPool();
         try {
             var futures = executor.invokeAll(clients);
