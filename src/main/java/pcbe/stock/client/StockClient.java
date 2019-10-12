@@ -3,6 +3,8 @@ package pcbe.stock.client;
 import static java.util.Objects.nonNull;
 import static java.util.Objects.requireNonNull;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -17,6 +19,8 @@ public class StockClient implements Callable<String> {
     private final Logger logger = LogManager.getLogger();
     private final UUID id;
     private StockServer stockServer;
+    private Map<String, Integer> ownedShares = new HashMap<>();
+    private Integer currencyUnits;
 
     /**
      * @param id A unique identifier for the client
@@ -27,7 +31,7 @@ public class StockClient implements Callable<String> {
     }
 
     /**
-     * @return true if the client is registered to a server; false otherwise
+     * @return <code>true</code> if the client is registered to a server; false otherwise
      */
     public boolean isRegistered() {
         return nonNull(stockServer);
@@ -46,13 +50,21 @@ public class StockClient implements Callable<String> {
     }
 
     /**
-     * Client entry point. Will be called by an {@link Executor}  
+     * Client entry point. Will be called by an {@link Executor}
      */
     @Override
     public String call() {
         if (!isRegistered())
             throw new RuntimeException("Client " + id + " not connected.");
         return "Client " + id + " done";
+    }
+
+    public void addShares(String company, int numberOfShares) {
+        ownedShares.compute(company, (k, v) -> v == null ? numberOfShares : v + numberOfShares);
+    }
+
+    public void addCurrencyUnits(Integer currencyUnits) {
+        this.currencyUnits += currencyUnits;
     }
 
     /**

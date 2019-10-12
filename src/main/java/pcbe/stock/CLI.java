@@ -14,6 +14,7 @@ public class CLI {
         var logger = LogManager.getLogger();
         var stockServer = new StockServer();
         var clients = StockClientGenerator.generateClients();
+        SystemInitializer.initializeSystem(stockServer, clients);
         clients.forEach(client -> client.registerTo(stockServer));
         var executor = Executors.newCachedThreadPool();
         try {

@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import pcbe.stock.client.StockClient;
 import pcbe.stock.client.StockClientGenerator;
 import pcbe.stock.server.StockServer;
-import pcbe.stock.server.api.StockService;
+import pcbe.stock.server.StockService;
 
 /**
  * This class holds all the unit tests of the application.
