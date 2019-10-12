@@ -3,6 +3,7 @@ This repository contains the implementation of Project 1 for the Concurrent and 
 ## **Team35** members:
 - Stan Mirun Ameteo
 - Sebo Diana Loredana
+- Negrescu Bogdan
 
 
 ## Stock Market

@@ -1,7 +1,8 @@
 package pcbe.stock.server.api;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
@@ -19,7 +20,7 @@ public class StockService {
 
 	private StockService() { }
 
-	private Set<String> clientIds = ConcurrentHashMap.newKeySet();
+	private Set<String> clientIds = Collections.synchronizedSet(new HashSet<>());
 
 	public RegisterResponse register(RegisterRequest registerRequest) {
 		var clientId = registerRequest.getClientId();
