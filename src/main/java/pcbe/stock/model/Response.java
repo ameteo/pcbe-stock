@@ -60,4 +60,11 @@ public class Response {
         }
     }
 
+    public static Response alreadyRegistered() {
+        return new Response(Status.AlreadyRegistered);
+    }
+    
+    public static Response registered() {
+        return new Response(Status.RegisteredSuccessfully);
+    }
 }

@@ -1,12 +1,14 @@
 package pcbe.stock.server;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import static java.util.Collections.synchronizedMap;
+
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
+import pcbe.stock.client.StockClient;
 import pcbe.stock.model.Response;
 
 public class StockService {
@@ -20,13 +22,13 @@ public class StockService {
 
 	private StockService() { }
 
-	private Set<UUID> clientIds = Collections.synchronizedSet(new HashSet<>());
+	private Map<UUID, StockClient> clients = synchronizedMap(new HashMap<>());
 
-	public Response register(UUID clientId) {
-		if (clientIds.contains(clientId))
-			return Response.failed("Client " + clientId + " already registered.");
-		logger.info("Client " + clientId + " registered successfully.");
-		clientIds.add(clientId);
-		return Response.successful();
+	public Response register(StockClient stockClient) {
+		if (clients.containsKey(stockClient.getId()))
+			return Response.alreadyRegistered();
+		clients.put(stockClient.getId(), stockClient);
+		logger.info("Client " + stockClient.getId() + " registered successfully.");
+		return Response.registered();
 	}
 }
