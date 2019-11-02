@@ -1,40 +1,63 @@
 package pcbe.stock.model;
 
-import static java.util.Objects.isNull;
+import static java.util.Arrays.asList;
+
+import java.util.List;
+import java.util.UUID;
+
+import pcbe.stock.model.StockItem.Demand;
+import pcbe.stock.model.StockItem.Offer;
 
 /**
  * Response returned by the server to client requests.
  */
 public class Response {
-    private String errorMessage;
+    private Status status;
+    private UUID itemId;
+    private List<Offer> offers;
+    private List<Demand> demands;
+    private List<Transaction> transactions;
 
-    private Response(String errorMessage) {
-        this.errorMessage = errorMessage;
+    private Response(Status status) {
+        this.status = status;
     }
 
-    public String getErrorMessage() {
-        return errorMessage;
-    }
-
-    /**
-     * @return true if the request finished successfuly
-     */
     public boolean isSuccessful() {
-        return isNull(errorMessage);
+        return status.isSuccessful();
     }
 
-    /**
-     * @param errorMessage 
-     * @return a failing response with the given error message
-     */
-    public static Response failed(String errorMessage) {
-        return new Response(errorMessage);
+    public Status getStatus() {
+        return status;
     }
 
-    /**
-     * @return a successful response
-     */
-	public static Response successful() {
-        return new Response(null);
-	}
+    public UUID getItemId() {
+        return itemId;
+    }
+
+    public List<Offer> getOffers() {
+        return offers;
+    }
+
+    public List<Demand> getDemands() {
+        return demands;
+    }
+
+    public List<Transaction> getTransactions() {
+        return transactions;
+    }
+
+   public enum Status {
+        RegisteredSuccessfully,
+        AlreadyRegistered,
+        NotRegistered,
+        Created,
+        DoesNotExist,
+        OngoingTransaction,
+        Changed;
+
+        public boolean isSuccessful() {
+            return asList(RegisteredSuccessfully, Created, Changed).contains(this);
+        }
+    }
+
 }

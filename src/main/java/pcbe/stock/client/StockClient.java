@@ -13,6 +13,7 @@ import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
 import pcbe.stock.model.Response;
+import pcbe.stock.model.Transaction;
 import pcbe.stock.server.StockServer;
 
 public class StockClient implements Callable<String> {
@@ -37,6 +38,12 @@ public class StockClient implements Callable<String> {
         return nonNull(stockServer);
     }
 
+	public void notifySale(Transaction transaction) {
+	}
+
+	public void notifyBuy(Transaction transaction) {
+	}
+
     /**
      * Registers the client to the given server
      * @param stockServer
@@ -44,7 +51,7 @@ public class StockClient implements Callable<String> {
      */
     public void registerTo(StockServer stockServer) {
         requireNonNull(stockServer);
-        requireSuccessfulResponse(() -> stockServer.register(id));
+        requireSuccessfulResponse(() -> stockServer.register(this));
         this.stockServer = stockServer;
         logger.info("Client " + id + " registered.");
     }
@@ -76,8 +83,12 @@ public class StockClient implements Callable<String> {
     private Response requireSuccessfulResponse(Supplier<Response> request) {
         var response = request.get();
         if (!response.isSuccessful())
-            throw new RuntimeException(response.getErrorMessage());
+            throw new RuntimeException();
         return response;
+    }
+
+    public UUID getId() {
+        return id;
     }
 
     /**

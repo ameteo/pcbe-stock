@@ -1,22 +1,44 @@
 package pcbe.stock.server;
 
-import java.util.Collection;
-import java.util.HashSet;
 import java.util.UUID;
 
+import pcbe.stock.client.StockClient;
 import pcbe.stock.model.Response;
 
 public class StockServer {
 
-	private static final StockService stockService = StockService.getDefault();
-	private Collection<String> companies = new HashSet<>();
+	private final StockService stockService = StockService.getDefault();
 
-	public Response register(UUID clientId) {
-		return stockService.register(clientId);
+	public Response register(StockClient stockClient) {
+		return stockService.register(stockClient);
 	}
 
-	public void addCompanies(Collection<String> companiesToBeAdded) {
-		companies.addAll(companiesToBeAdded);
+	public Response offerShares(UUID clientId, String company, int shares, double price) {
+		return null;
 	}
 
+
+	public Response demandShares(UUID clientId, String company, int shares, double price) {
+		return null;
+	}
+
+	public Response changeOffer(UUID clientId, UUID offerId, int newShares, double newPrice) {
+		return null;
+	}
+
+	public Response changeDemand(UUID clientId, UUID demandId, int newShares, double newPrice) {
+		return null;
+	}
+
+	public Response getOffers(UUID clientId) {
+		return null;
+	}
+
+	public Response getDemands(UUID clientId) {
+		return null;
+	}
+
+	public Response getTransactionHistory(UUID clientId) {
+		return null;
+	}
 }

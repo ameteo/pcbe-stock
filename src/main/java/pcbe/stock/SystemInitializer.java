@@ -25,7 +25,6 @@ public class SystemInitializer {
             .collect(toList());
         var currentShares = selectedCompanies.stream()
             .collect(toMap(c -> c, c -> getRandomShares()));
-        server.addCompanies(selectedCompanies);
         for (var client : clients) {
             client.addCurrencyUnits(getCurrencyAmount());
             for (var company : selectedCompanies)
