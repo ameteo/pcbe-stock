@@ -6,6 +6,8 @@ import static java.util.stream.Collectors.toMap;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import pcbe.stock.client.StockClient;
@@ -20,22 +22,37 @@ public class SystemInitializer {
             "Alphabet Inc.", "Microsoft", "Huawei", "Hitachi", 
             "IBM", "Dell Technologies", "Sony", "Panasonic", 
             "Intel", "LG Electronics", "JD.com", "HP Inc.");
-        var selectedCompanies = allCompanies.stream()
+        var selectedCompanies = selectCompanies(allCompanies);
+        var sharesPerCompany = initializeSharesPerCompany(selectedCompanies);
+        provideClientsWithCurrencyUnits(clients);
+        provideClientsWithShares(selectedCompanies, sharesPerCompany);
+    }
+
+    private static void provideClientsWithShares(List<String> selectedCompanies, Map<String, Integer> sharesPerCompany) {
+        for (var company : selectedCompanies) {
+            var client = getRandomClient();
+            client.addShares(company, sharesPerCompany.get(company));
+        }
+    }
+
+    private static Map<String, Integer> initializeSharesPerCompany(List<String> selectedCompanies) {
+        return selectedCompanies.stream()
+            .collect(toMap(c -> c, c -> getRandomShares()));
+    }
+
+    private static List<String> selectCompanies(List<String> allCompanies) {
+        return allCompanies.stream()
             .filter(c -> shouldSelectCompany())
             .collect(toList());
-        var currentShares = selectedCompanies.stream()
-            .collect(toMap(c -> c, c -> getRandomShares()));
-        for (var client : clients) {
+    }
+
+    private static void provideClientsWithCurrencyUnits(Collection<StockClient> clients) {
+        for (var client : clients)
             client.addCurrencyUnits(getCurrencyAmount());
-            for (var company : selectedCompanies)
-                if (shouldGiveSharesToClient()) {
-                    var availableShares = currentShares.get(company);
-                    var givenShares = getSharesLessThan(availableShares);
-                    client.addShares(company, givenShares);
-                    currentShares.put(company, availableShares - givenShares);
-                } else
-                    client.addShares(company, 0);
-        }
+    }
+
+    private static StockClient getRandomClient() {
+        return null;
     }
 
     private static Integer getCurrencyAmount() {
@@ -46,15 +63,7 @@ public class SystemInitializer {
         return random() > .5;
     }
 
-    private static boolean shouldGiveSharesToClient() {
-        return random() > .2;
-    }
-
     private static int getRandomShares() {
         return 50 * (random.nextInt(10) + 10);
-    }
-
-    private static int getSharesLessThan(int amount) {
-        return 50 * random.nextInt(amount / 50);
     }
 }

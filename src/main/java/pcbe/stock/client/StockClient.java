@@ -14,9 +14,14 @@ import java.util.logging.Logger;
 import pcbe.log.LogManager;
 import pcbe.stock.model.Response;
 import pcbe.stock.model.Transaction;
+import pcbe.stock.model.StockItem.Offer;
 import pcbe.stock.server.StockServer;
 
 public class StockClient implements Callable<String> {
+    /**
+     *
+     */
+    private static final int FIXED_PRICE = 1;
     private final Logger logger = LogManager.getLogger();
     private final UUID id;
     private StockServer stockServer;
@@ -38,10 +43,12 @@ public class StockClient implements Callable<String> {
         return nonNull(stockServer);
     }
 
-	public void notifySale(Transaction transaction) {
+	public synchronized void notifySale(Transaction transaction) {
+        currencyUnits += Double.valueOf(transaction.getShares() * transaction.getPrice()).intValue();
+        ownedShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares());
 	}
 
-	public void notifyBuy(Transaction transaction) {
+	public synchronized void notifyBuy(Transaction transaction) {
 	}
 
     /**
@@ -63,7 +70,44 @@ public class StockClient implements Callable<String> {
     public String call() {
         if (!isRegistered())
             throw new RuntimeException("Client " + id + " not connected.");
+        doClientyStuff();
         return "Client " + id + " done";
+    }
+
+    private void doClientyStuff() {
+        while(true) 
+        {
+            offerOwnedShares();
+            checkForOffersAndDemandShares();
+            lookAtTransactionHistory();
+            //make sure server has enough time to notify sales / buys
+        }
+    }
+
+    private void lookAtTransactionHistory() {
+        stockServer.getTransactionHistory(id);
+        
+    }
+
+    private synchronized void checkForOffersAndDemandShares() {
+        var existingOffers = stockServer.getOffers(id).getOffers();
+        for (var offer : existingOffers) {
+            if(!ownedShares.keySet().contains(offer.getCompany())) {
+                var nrOfSharesToDemand = decideNrOfSharesToDemand(offer);
+                stockServer.demandShares(id, offer.getCompany(), nrOfSharesToDemand, offer.getPrice());
+            }
+        }
+
+    }
+
+    private int decideNrOfSharesToDemand(Offer offer) {
+        return offer.getPrice() * offer.getShares() < currencyUnits ? offer.getShares() : Double.valueOf(currencyUnits / offer.getPrice()).intValue();
+    }
+
+    private synchronized void offerOwnedShares() {
+        for (var sharesPerCompany : ownedShares.entrySet())
+            if(sharesPerCompany.getValue() > 0)
+                stockServer.offerShares(id, sharesPerCompany.getKey(), sharesPerCompany.getValue(), FIXED_PRICE);
     }
 
     public void addShares(String company, int numberOfShares) {
