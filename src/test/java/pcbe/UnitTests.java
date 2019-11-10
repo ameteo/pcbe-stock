@@ -31,14 +31,17 @@ import pcbe.stock.server.StockService;
  * This class holds all the unit tests of the application.
  */
 class UnitTests {
+
+    private static final int LIFESPAN = 120;
+
     @Test
     void cannotInstantiateInvalidClient() {
-        assertThrows(RuntimeException.class, () -> new StockClient(null));
+        assertThrows(RuntimeException.class, () -> new StockClient(null, 0));
     }
 
     @Test
     void canInstantiateValidClient() {
-        assertDoesNotThrow(() -> new StockClient(UUID.randomUUID()));
+        assertDoesNotThrow(() -> new StockClient(UUID.randomUUID(), LIFESPAN));
     }
 
     @Test
@@ -53,11 +56,12 @@ class UnitTests {
 
     @Nested
     class OneClient {
+
         StockClient client;
 
         @BeforeEach
         void createNewClient() {
-            client = new StockClient(UUID.randomUUID());
+            client = new StockClient(UUID.randomUUID(), LIFESPAN);
         }
 
         @Test

@@ -2,57 +2,85 @@ package pcbe.stock.client;
 
 import static java.util.Objects.nonNull;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toList;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
 import pcbe.stock.model.Response;
-import pcbe.stock.model.Transaction;
+import pcbe.stock.model.StockItem.Demand;
 import pcbe.stock.model.StockItem.Offer;
+import pcbe.stock.model.Transaction;
 import pcbe.stock.server.StockServer;
 
 public class StockClient implements Callable<String> {
-    /**
-     *
-     */
-    private static final int FIXED_PRICE = 1;
-    private final Logger logger = LogManager.getLogger();
+
     private final UUID id;
     private StockServer stockServer;
+    private double currencyUnits;
+    private double restrictedCurrencyUnits;
+
     private Map<String, Integer> ownedShares = new HashMap<>();
-    private Integer currencyUnits;
+    private Map<String, Integer> offeredShares = new HashMap<>();
+    private static final double FIXED_PRICE = 1;
+
+    private final Logger logger = LogManager.getLogger();
+
+    private Timer timer;
+    private int lifespanSeconds;
+    private AtomicBoolean stillHaveTime = new AtomicBoolean(true);
+    private TimerTask lifespan = new TimerTask() {
+        @Override
+        public void run() {
+            stillHaveTime.set(false);
+        }
+    };
 
     /**
      * @param id A unique identifier for the client
      * @throws NullPointerException if <code>id</code> is <code>null</code>
      */
-    public StockClient(UUID id) {
+    public StockClient(UUID id, int lifespanSeconds) {
         this.id = requireNonNull(id);
+        this.lifespanSeconds = lifespanSeconds;
+        timer = new Timer();
     }
 
     /**
-     * @return <code>true</code> if the client is registered to a server; false otherwise
+     * @return <code>true</code> if the client is registered to a server; false
+     *         otherwise
      */
     public boolean isRegistered() {
         return nonNull(stockServer);
     }
 
-	public synchronized void notifySale(Transaction transaction) {
-        currencyUnits += Double.valueOf(transaction.getShares() * transaction.getPrice()).intValue();
-        ownedShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares());
-	}
+    public synchronized void notifySale(Transaction transaction) {
+        currencyUnits += calculateCurrencyAmount(transaction);
+        offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares());
+    }
 
-	public synchronized void notifyBuy(Transaction transaction) {
-	}
+    public synchronized void notifyBuy(Transaction transaction) {
+        restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
+        ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
+    }
+
+    private int calculateCurrencyAmount(Transaction transaction) {
+        return Double.valueOf(transaction.getShares() * transaction.getPrice()).intValue();
+    }
 
     /**
      * Registers the client to the given server
+     * 
      * @param stockServer
      * @throws NullPointerException if <code>stockServer</code> is <code>null</code>
      */
@@ -70,44 +98,70 @@ public class StockClient implements Callable<String> {
     public String call() {
         if (!isRegistered())
             throw new RuntimeException("Client " + id + " not connected.");
-        doClientyStuff();
+        performAlgorithm();
         return "Client " + id + " done";
     }
 
-    private void doClientyStuff() {
-        while(true) 
-        {
-            offerOwnedShares();
-            checkForOffersAndDemandShares();
-            lookAtTransactionHistory();
-            //make sure server has enough time to notify sales / buys
+    private void performAlgorithm() {
+        timer.schedule(lifespan, TimeUnit.SECONDS.toMillis(lifespanSeconds));
+        while (stillHaveTime.get()) {
+            offerShares();
+            demandShares();
         }
     }
 
-    private void lookAtTransactionHistory() {
-        stockServer.getTransactionHistory(id);
-        
+    public synchronized void offerShares() {
+        for (var sharesPerCompany : ownedShares.entrySet())
+            if(sharesPerCompany.getValue() > 0) {
+                var calculatedPrice = calculatePrice(sharesPerCompany.getKey());
+                stockServer.offerShares(id, sharesPerCompany.getKey(), sharesPerCompany.getValue(), calculatedPrice);
+                offeredShares.compute(sharesPerCompany.getKey(), (k, v) -> sharesPerCompany.getValue() + (v == null ? 0 : v));
+                sharesPerCompany.setValue(0);
+                break;
+            }
+    }
+    
+    private double calculatePrice(String company) {
+        return Math.random() > 0.5 ? consultDemandsAndCalculatePrice(company) : consultTransactionHistoryAndCalculatePrice(company);
+    }
+    
+    private double consultDemandsAndCalculatePrice(String company) {
+        var demandsOfCompany = stockServer.getDemands(id).getDemands().stream().filter(t -> t.getCompany().equals(company)).collect(toList());
+
+        if(demandsOfCompany.isEmpty())
+            return FIXED_PRICE;
+
+        return demandsOfCompany.stream().map(Demand::getPrice).reduce(Math::max).get();
+    }
+    
+    private double consultTransactionHistoryAndCalculatePrice(String company) {
+        var transactionHistoryOfCompany = stockServer.getTransactionHistory(id).getTransactions()
+            .stream().filter(t -> t.getCompany().equals(company)).collect(toList());
+        if(transactionHistoryOfCompany.isEmpty())
+            return FIXED_PRICE;
+
+        var highestPriceInHistory = transactionHistoryOfCompany.stream().map(Transaction::getPrice).reduce(Math::max).get();
+        return Math.random() > 0.5 ? highestPriceInHistory : highestPriceInHistory + 0.5;
     }
 
-    private synchronized void checkForOffersAndDemandShares() {
+    public synchronized void demandShares() {
         var existingOffers = stockServer.getOffers(id).getOffers();
         for (var offer : existingOffers) {
             if(!ownedShares.keySet().contains(offer.getCompany())) {
-                var nrOfSharesToDemand = decideNrOfSharesToDemand(offer);
+                var nrOfSharesToDemand = calculateNumberOfSharesToDemand(offer);
                 stockServer.demandShares(id, offer.getCompany(), nrOfSharesToDemand, offer.getPrice());
+                putCurrencyAside(offer.getPrice() * nrOfSharesToDemand);
             }
         }
-
     }
 
-    private int decideNrOfSharesToDemand(Offer offer) {
+    private void putCurrencyAside(double amount) {
+        currencyUnits -= amount;
+        restrictedCurrencyUnits += amount;
+    }
+
+    private int calculateNumberOfSharesToDemand(Offer offer) {
         return offer.getPrice() * offer.getShares() < currencyUnits ? offer.getShares() : Double.valueOf(currencyUnits / offer.getPrice()).intValue();
-    }
-
-    private synchronized void offerOwnedShares() {
-        for (var sharesPerCompany : ownedShares.entrySet())
-            if(sharesPerCompany.getValue() > 0)
-                stockServer.offerShares(id, sharesPerCompany.getKey(), sharesPerCompany.getValue(), FIXED_PRICE);
     }
 
     public void addShares(String company, int numberOfShares) {
