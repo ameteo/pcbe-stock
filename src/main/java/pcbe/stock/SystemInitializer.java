@@ -25,12 +25,12 @@ public class SystemInitializer {
         var selectedCompanies = selectCompanies(allCompanies);
         var sharesPerCompany = initializeSharesPerCompany(selectedCompanies);
         provideClientsWithCurrencyUnits(clients);
-        provideClientsWithShares(selectedCompanies, sharesPerCompany);
+        provideClientsWithShares(selectedCompanies, sharesPerCompany, clients);
     }
 
-    private static void provideClientsWithShares(List<String> selectedCompanies, Map<String, Integer> sharesPerCompany) {
+    private static void provideClientsWithShares(List<String> selectedCompanies, Map<String, Integer> sharesPerCompany, Collection<StockClient> clients) {
         for (var company : selectedCompanies) {
-            var client = getRandomClient();
+            var client = getRandomClient(clients);
             client.addShares(company, sharesPerCompany.get(company));
         }
     }
@@ -51,8 +51,8 @@ public class SystemInitializer {
             client.addCurrencyUnits(getCurrencyAmount());
     }
 
-    private static StockClient getRandomClient() {
-        return null;
+    private static StockClient getRandomClient(Collection<StockClient> clients) {
+        return clients.stream().findAny().get();
     }
 
     private static Integer getCurrencyAmount() {
