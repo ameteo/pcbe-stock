@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
+import pcbe.stock.model.Notifiers;
 import pcbe.stock.model.Response;
 import pcbe.stock.model.StockItem.Demand;
 import pcbe.stock.model.StockItem.Offer;
@@ -72,6 +73,10 @@ public class StockClient implements Callable<String> {
     public synchronized void notifyBuy(Transaction transaction) {
         restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
         ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
+    }
+
+    public Notifiers getNotifiers() {
+        return new StockClientNotifiers(this::notifyBuy, this::notifySale);
     }
 
     private int calculateCurrencyAmount(Transaction transaction) {
