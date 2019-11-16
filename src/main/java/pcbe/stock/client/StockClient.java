@@ -34,7 +34,7 @@ public class StockClient implements Callable<String> {
     private Map<String, Integer> offeredShares = new HashMap<>();
     private static final double FIXED_PRICE = 1;
 
-    private final Logger logger = LogManager.getLogger();
+    private final Logger logger = LogManager.getClientLogger();
 
     private Timer timer;
     private int lifespanSeconds;
@@ -65,11 +65,13 @@ public class StockClient implements Callable<String> {
     }
 
     public synchronized void notifySale(Transaction transaction) {
+        logger.info("notify sale for client " + id + " and transaction " + transaction.getId());
         currencyUnits += calculateCurrencyAmount(transaction);
         offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares());
     }
 
     public synchronized void notifyBuy(Transaction transaction) {
+        logger.info("notify buy for client " + id + " and transaction " + transaction.getId());
         restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
         ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
     }
@@ -88,7 +90,6 @@ public class StockClient implements Callable<String> {
         requireNonNull(stockServer);
         requireSuccessfulResponse(() -> stockServer.register(this));
         this.stockServer = stockServer;
-        logger.info("Client " + id + " registered.");
     }
 
     /**
@@ -165,10 +166,12 @@ public class StockClient implements Callable<String> {
     }
 
     public void addShares(String company, int numberOfShares) {
+        logger.info(id + " has been provided with " + numberOfShares + " shares of the company " + company);
         ownedShares.compute(company, (k, v) -> v == null ? numberOfShares : v + numberOfShares);
     }
 
     public void addCurrencyUnits(Integer currencyUnits) {
+        logger.info(id + " has been provided with " + currencyUnits + " units of currency");
         this.currencyUnits += currencyUnits;
     }
 
