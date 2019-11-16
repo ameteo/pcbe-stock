@@ -108,6 +108,7 @@ public class StockClient implements Callable<String> {
             offerShares();
             demandShares();
         }
+        timer.cancel();
     }
 
     public synchronized void offerShares() {
@@ -147,6 +148,8 @@ public class StockClient implements Callable<String> {
     public synchronized void demandShares() {
         var existingOffers = stockServer.getOffers(id).getOffers();
         for (var offer : existingOffers) {
+            if (currencyUnits == 0)
+                break;
             if(!ownedShares.keySet().contains(offer.getCompany())) {
                 var nrOfSharesToDemand = calculateNumberOfSharesToDemand(offer);
                 stockServer.demandShares(id, offer.getCompany(), nrOfSharesToDemand, offer.getPrice());
