@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
+import pcbe.stock.model.Notifiers;
 import pcbe.stock.model.Response;
 import pcbe.stock.model.StockItem.Demand;
 import pcbe.stock.model.StockItem.Offer;
@@ -74,6 +75,10 @@ public class StockClient implements Callable<String> {
         ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
     }
 
+    public Notifiers getNotifiers() {
+        return new StockClientNotifiers(this::notifyBuy, this::notifySale);
+    }
+
     private int calculateCurrencyAmount(Transaction transaction) {
         return Double.valueOf(transaction.getShares() * transaction.getPrice()).intValue();
     }
@@ -108,6 +113,7 @@ public class StockClient implements Callable<String> {
             offerShares();
             demandShares();
         }
+        timer.cancel();
     }
 
     public synchronized void offerShares() {
@@ -147,6 +153,8 @@ public class StockClient implements Callable<String> {
     public synchronized void demandShares() {
         var existingOffers = stockServer.getOffers(id).getOffers();
         for (var offer : existingOffers) {
+            if (currencyUnits == 0)
+                break;
             if(!ownedShares.keySet().contains(offer.getCompany())) {
                 var nrOfSharesToDemand = calculateNumberOfSharesToDemand(offer);
                 stockServer.demandShares(id, offer.getCompany(), nrOfSharesToDemand, offer.getPrice());

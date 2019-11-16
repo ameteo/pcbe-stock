@@ -14,6 +14,6 @@ public class StockClientGenerator {
     public static Collection<StockClient> generateClients() {
         //TODO: generate random lifespans for clients
         return Stream.generate(UUID::randomUUID).limit(new Random().nextInt(5) + 5)
-                .map(id -> new StockClient(id, 120)).collect(toList());
+                .map(id -> new StockClient(id, 10)).collect(toList());
     }
 }
