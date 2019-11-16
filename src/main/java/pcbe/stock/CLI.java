@@ -5,13 +5,11 @@ import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 
-import pcbe.log.LogManager;
 import pcbe.stock.client.StockClientGenerator;
 import pcbe.stock.server.StockServer;
 
 public class CLI {
     public static void main(String[] args) throws IOException {
-        var logger = LogManager.getLogger();
         var stockServer = new StockServer();
         var clients = StockClientGenerator.generateClients();
         SystemInitializer.initializeSystem(stockServer, clients);
@@ -20,11 +18,11 @@ public class CLI {
         try {
             var futures = executor.invokeAll(clients);
             for (var future : futures)
-                logger.info(future.get());
+                System.out.println(future.get());
         } catch (InterruptedException | ExecutionException e) {
             e.printStackTrace();
         }
-        logger.info("ENTER to stop the program.");
+        System.out.println("ENTER to stop the program.");
         while (System.in.read() != '\n');
         executor.shutdownNow();
     }
