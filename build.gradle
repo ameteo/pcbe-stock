@@ -18,7 +18,8 @@ dependencies {
     def hamcrest_version = '2.2-rc1'
     testImplementation group: 'org.hamcrest', name: 'hamcrest', version: hamcrest_version
     
-    testCompile group: 'org.mockito', name: 'mockito-junit-jupiter', version: '3.1.0'
+    def mockito_version = '3.1.0'
+    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter', version: mockito_version
 }
 
 application {
@@ -40,7 +41,7 @@ test {
 
 run {
     standardInput = System.in
-    jvmArgs '-Xlint:preview --enable-preview'
+    jvmArgs '--enable-preview'
 }
 
 // run 'gradle eclipseJdt` to enable java 12 preview features in Visual Studio Code 
