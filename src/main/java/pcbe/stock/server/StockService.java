@@ -84,11 +84,13 @@ public class StockService {
     }
 
     public void changeDemand(UUID demandId, int newShares, double newPrice) {
-        changeItem(demandId, newShares, newPrice);
+        var demand = changeItem(demandId, newShares, newPrice);
+        doTransactionsWithDemand(Demand.class.cast(demand));
     }
 
     public void changeOffer(UUID offerId, int newShares, double newPrice) {
-        changeItem(offerId, newShares, newPrice);
+        var offer = changeItem(offerId, newShares, newPrice);
+        doTransactionsWithOffer(Offer.class.cast(offer));
     }
 
     private void doTransactionsWithDemand(Demand demand) {
@@ -271,8 +273,8 @@ public class StockService {
         });
     }
 
-    private void changeItem(UUID itemId, int newShares, double newPrice) {
-        doUnderWriteLock(() -> {
+    private StockItem changeItem(UUID itemId, int newShares, double newPrice) {
+        return doUnderWriteLock(() -> {
             var optionalEntry = stockItems.entrySet().stream()
                 .filter(e -> e.getKey().getId().equals(itemId))
                 .findFirst();
@@ -282,15 +284,15 @@ public class StockService {
                 throw new RuntimeException();
             }
             var entry = optionalEntry.get();
-            switch(entry.getValue()) {
-                case Transaction:
-                    logger.info(stringFrom("Trying to change item with id ", itemId, " but it's currently in a transaction"));
-                    throw new AlreadyInTransactionException();
-                case Waiting:
-                    var stockItem = entry.getKey();
-                    stockItem.setShares(newShares);
-                    stockItem.setPrice(newPrice);
-            };
+            if (entry.getValue() == StockItemState.Transaction) {
+                logger.info(stringFrom("Trying to change item with id ", itemId, " but it's currently in a transaction"));
+                throw new AlreadyInTransactionException();
+            } else {
+                var stockItem = entry.getKey();
+                stockItem.setShares(newShares);
+                stockItem.setPrice(newPrice);
+                return stockItem;
+            }
         });
     }
 
