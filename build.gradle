@@ -41,7 +41,7 @@ test {
 
 run {
     standardInput = System.in
-    jvmArgs '-Xlint:preview --enable-preview'
+    jvmArgs '--enable-preview'
 }
 
 // run 'gradle eclipseJdt` to enable java 12 preview features in Visual Studio Code 
