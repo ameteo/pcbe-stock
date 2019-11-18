@@ -36,7 +36,7 @@ import pcbe.stock.model.Transaction;
 
 public class StockService {
 
-    private static final Logger logger = LogManager.getClientLogger();
+    private static final Logger logger = LogManager.getServerLogger();
     private static StockService stockService = new StockService();
     private static final boolean FAIRNESS = true;
 
@@ -158,7 +158,7 @@ public class StockService {
         logBeforeTransaction(demand, offer, tradedShares);
         offer.setShares(offer.getShares() - tradedShares);
         demand.setShares(demand.getShares() - tradedShares);
-        var transaction = new Transaction(offerClientId, demandClientId, company, tradedShares, price);
+        var transaction = new Transaction(offerClientId, demandClientId, offer.getId(), demand.getId(), company, tradedShares, price);
         transactions.add(transaction);
         var partition = Stream.of(demand, offer).collect(partitioningBy(item -> item.getShares() == 0));
         var itemsToRemove = partition.get(true);
@@ -172,6 +172,14 @@ public class StockService {
     private void setItemsStateToWaiting(List<StockItem> itemsToPutToWaiting) {
         doUnderWriteLock(() -> {
             itemsToPutToWaiting.forEach(item -> stockItems.put(item, StockItemState.Waiting));
+        });
+    }
+
+    public void removeItem(UUID itemId) {
+        doUnderWriteLock(() -> {
+            stockItems.entrySet().stream()
+                .filter(entry -> itemId.equals(entry.getKey().getId())).findAny()
+                .ifPresent(entry -> stockItems.remove(entry.getKey()));
         });
     }
 

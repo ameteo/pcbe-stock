@@ -4,16 +4,20 @@ import java.util.UUID;
 
 public final class Transaction {
 	private UUID id;
-	private UUID from;
-	private UUID to;
+	private UUID offeringClientId;
+	private UUID demandingClientId;
+	private UUID offerId;
+	private UUID demandId;
 	private String company;
 	private int shares;
 	private double price;
 
-	public Transaction(UUID from, UUID to, String company, int shares, double price) {
+	public Transaction(UUID offeringClientId, UUID demandingClientId, UUID offerId, UUID demandId, String company, int shares, double price) {
 		this.id = UUID.randomUUID();
-		this.from = from;
-		this.to = to;
+		this.offeringClientId = offeringClientId;
+		this.demandingClientId = demandingClientId;
+		this.offerId = offerId;
+		this.demandId = demandId;
 		this.company = company;
 		this.shares = shares;
 		this.price = price;
@@ -23,12 +27,20 @@ public final class Transaction {
 		return id;
 	}
 
-	public UUID getFrom() {
-		return from;
+	public UUID getOfferingClientId() {
+		return offeringClientId;
 	}
 
-	public UUID getTo() {
-		return to;
+	public UUID getDemandingClientId() {
+		return demandingClientId;
+	}
+
+	public UUID getOfferId() {
+		return offerId;
+	}
+
+	public UUID getDemandId() {
+		return demandId;
 	}
 
 	public String getCompany() {
