@@ -4,6 +4,7 @@ import static java.util.Objects.nonNull;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
+import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Timer;
@@ -13,6 +14,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
@@ -33,7 +35,12 @@ public class StockClient implements Callable<String> {
 
     private Map<String, Integer> ownedShares = new HashMap<>();
     private Map<String, Integer> offeredShares = new HashMap<>();
-    private static final double FIXED_PRICE = 1;
+    private static final double DEFAULT_PRICE = 1;
+
+    private Map.Entry<UUID, TimerTask> offer;
+    private Map.Entry<UUID, TimerTask> demand;
+
+    private final ReentrantLock lock = new ReentrantLock();
 
     private final Logger logger = LogManager.getClientLogger();
 
@@ -65,16 +72,30 @@ public class StockClient implements Callable<String> {
         return nonNull(stockServer);
     }
 
-    public synchronized void notifySale(Transaction transaction) {
+    public void notifySale(Transaction transaction) {
         logger.info("notify sale for client " + id + " and transaction " + transaction.getId());
-        currencyUnits += calculateCurrencyAmount(transaction);
-        offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares());
+        lock.lock();
+        try {
+            currencyUnits += calculateCurrencyAmount(transaction);
+            offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares()); 
+            offer.getValue().cancel();
+            offer = null;
+        } finally {
+            lock.unlock();
+        }
     }
 
-    public synchronized void notifyBuy(Transaction transaction) {
+    public void notifyBuy(Transaction transaction) {
         logger.info("notify buy for client " + id + " and transaction " + transaction.getId());
-        restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
-        ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
+        lock.lock();
+        try {
+            restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
+            ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
+            demand.getValue().cancel();
+            demand = null;
+        } finally {
+            lock.unlock();
+        }
     }
 
     public Notifiers getNotifiers() {
@@ -117,17 +138,74 @@ public class StockClient implements Callable<String> {
         timer.cancel();
     }
 
-    public synchronized void offerShares() {
-        for (var sharesPerCompany : ownedShares.entrySet())
-            if(sharesPerCompany.getValue() > 0) {
-                var calculatedPrice = calculatePrice(sharesPerCompany.getKey());
-                stockServer.offerShares(id, sharesPerCompany.getKey(), sharesPerCompany.getValue(), calculatedPrice);
-                offeredShares.compute(sharesPerCompany.getKey(), (k, v) -> sharesPerCompany.getValue() + (v == null ? 0 : v));
-                sharesPerCompany.setValue(0);
-                break;
+    public void offerShares() {
+        lock.lock();
+        try {
+            if(offer == null) {
+                var optionalShares = ownedShares.entrySet().stream().findAny();
+                if(optionalShares.isPresent()) {
+                    var sharesPerCompany = optionalShares.get();
+                    var calculatedPrice = calculatePrice(sharesPerCompany.getKey());
+                    var response = stockServer.offerShares(id, sharesPerCompany.getKey(), sharesPerCompany.getValue(), calculatedPrice);
+                    if(response.isSuccessful()) {
+                        var offerId = response.getItemId();
+                        offeredShares.compute(sharesPerCompany.getKey(), (k, v) -> sharesPerCompany.getValue() + (v == null ? 0 : v));
+                        ownedShares.remove(sharesPerCompany.getKey());
+                        offer = new AbstractMap.SimpleEntry<>(offerId, createChangeOfferTask(offerId));
+                    }
+                }
             }
+        } finally {
+            lock.unlock();
+        }
     }
     
+    private TimerTask createChangeOfferTask(UUID offerId) {
+        var timerTask = new TimerTask() {
+
+            @Override
+            public void run() {
+                var response = stockServer.getOfferById(id, offerId);
+                if(response.isSuccessful()) {
+                    var existentOffer = response.getOffer();
+                    var changeResponse = stockServer.changeOffer(id, offerId, existentOffer.getShares(), existentOffer.getPrice() * 0.5);
+                    if(changeResponse.isSuccessful()) {
+                        lock.lock();
+                        try {
+                            offer.getValue().cancel();
+                            offer.setValue(createRemoveItemTask(offerId));
+                        } finally {
+                            lock.unlock();
+                        }
+                    }
+                }
+            }
+        };
+
+        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        return timerTask;
+    }
+
+    private TimerTask createRemoveItemTask(UUID itemId) {
+        var timerTask = new TimerTask() {
+
+            @Override
+            public void run() {
+                if(stockServer.removeItem(id, itemId).isSuccessful()) {
+                    lock.lock();
+                    try {
+                        offer.getValue().cancel();
+                        offer = null;
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+            }
+        };
+        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        return timerTask;
+    }
+
     private double calculatePrice(String company) {
         return Math.random() > 0.5 ? consultDemandsAndCalculatePrice(company) : consultTransactionHistoryAndCalculatePrice(company);
     }
@@ -136,7 +214,7 @@ public class StockClient implements Callable<String> {
         var demandsOfCompany = stockServer.getDemands(id).getDemands().stream().filter(t -> t.getCompany().equals(company)).collect(toList());
 
         if(demandsOfCompany.isEmpty())
-            return FIXED_PRICE;
+            return DEFAULT_PRICE;
 
         return demandsOfCompany.stream().map(Demand::getPrice).reduce(Math::max).get();
     }
@@ -144,23 +222,69 @@ public class StockClient implements Callable<String> {
     private double consultTransactionHistoryAndCalculatePrice(String company) {
         var transactionHistoryOfCompany = stockServer.getTransactionHistory(id).getTransactions()
             .stream().filter(t -> t.getCompany().equals(company)).collect(toList());
+
         if(transactionHistoryOfCompany.isEmpty())
-            return FIXED_PRICE;
+            return DEFAULT_PRICE;
 
         var highestPriceInHistory = transactionHistoryOfCompany.stream().map(Transaction::getPrice).reduce(Math::max).get();
         return Math.random() > 0.5 ? highestPriceInHistory : highestPriceInHistory + 0.5;
     }
 
-    public synchronized void demandShares() {
-        var existingOffers = stockServer.getOffers(id).getOffers();
-        for (var offer : existingOffers) {
-            if (currencyUnits == 0)
-                break;
-            if(!ownedShares.keySet().contains(offer.getCompany())) {
-                var nrOfSharesToDemand = calculateNumberOfSharesToDemand(offer);
-                stockServer.demandShares(id, offer.getCompany(), nrOfSharesToDemand, offer.getPrice());
-                putCurrencyAside(offer.getPrice() * nrOfSharesToDemand);
+    public void demandShares() {
+        lock.lock();
+        try {
+            if(demand == null && currencyUnits != 0) {
+                var existingOffers = stockServer.getOffers(id).getOffers();
+                for (var offer : existingOffers) {
+                    if(offerIsNotMine(offer)) {
+                        var nrOfSharesToDemand = calculateNumberOfSharesToDemand(offer);
+                        var response = stockServer.demandShares(id, offer.getCompany(), nrOfSharesToDemand, offer.getPrice());
+                        if(response.isSuccessful()) {
+                            var demandId = response.getItemId();
+                            putCurrencyAside(offer.getPrice() * nrOfSharesToDemand);
+                            demand = new AbstractMap.SimpleEntry<>(demandId, createChangeDemandTask(demandId));
+                            break;
+                        }
+                    }
+                }
             }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private TimerTask createChangeDemandTask(UUID demandId) {
+        var timerTask = new TimerTask() {
+
+            @Override
+            public void run() {
+                var response = stockServer.getDemandById(id, demandId);
+                if(response.isSuccessful()) {
+                    var existentDemand = response.getDemand();
+                    var changeResponse = stockServer.changeDemand(id, demandId, existentDemand.getShares(), existentDemand.getPrice() * 1.5);
+                    if(changeResponse.isSuccessful()) {
+                        lock.lock();
+                        try {
+                            demand.getValue().cancel();
+                            demand.setValue(createRemoveItemTask(demandId));
+                        } finally {
+                            lock.unlock();
+                        }
+                    }
+                }
+            }
+        };
+
+        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        return timerTask;
+    }
+
+    private boolean offerIsNotMine(Offer offer) {
+        lock.lock();
+        try {
+            return this.offer != null && offer.getId().equals(this.offer.getKey()) == false;
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -175,12 +299,22 @@ public class StockClient implements Callable<String> {
 
     public void addShares(String company, int numberOfShares) {
         logger.info(id + " has been provided with " + numberOfShares + " shares of the company " + company);
-        ownedShares.compute(company, (k, v) -> v == null ? numberOfShares : v + numberOfShares);
+        lock.lock();
+        try {
+            ownedShares.compute(company, (k, v) -> v == null ? numberOfShares : v + numberOfShares);
+        } finally {
+            lock.unlock();
+        }
     }
 
     public void addCurrencyUnits(Integer currencyUnits) {
         logger.info(id + " has been provided with " + currencyUnits + " units of currency");
-        this.currencyUnits += currencyUnits;
+        lock.lock();
+        try {
+            this.currencyUnits += currencyUnits;
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
