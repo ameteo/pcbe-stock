@@ -17,6 +17,7 @@ public class Response {
     private UUID itemId;
     private Set<Offer> offers;
     private Set<Demand> demands;
+    private StockItem item;
     private List<Transaction> transactions;
 
     private Response(Status status) {
@@ -39,8 +40,16 @@ public class Response {
         return offers;
     }
 
+    public Offer getOffer() {
+        return Offer.class.cast(item);
+    }
+
     public Set<Demand> getDemands() {
         return demands;
+    }
+
+    public Demand getDemand() {
+        return Demand.class.cast(item);
     }
 
     public List<Transaction> getTransactions() {
@@ -48,7 +57,7 @@ public class Response {
     }
 
    public enum Status {
-        RegisteredSuccessfully,
+        Successful,
         AlreadyRegistered,
         NotRegistered,
         Created,
@@ -57,7 +66,7 @@ public class Response {
         Changed;
 
         public boolean isSuccessful() {
-            return asList(RegisteredSuccessfully, Created, Changed).contains(this);
+            return asList(Successful, Created, Changed).contains(this);
         }
     }
 
@@ -66,7 +75,7 @@ public class Response {
     }
     
     public static Response registeredSuccessfully() {
-        return new Response(Status.RegisteredSuccessfully);
+        return new Response(Status.Successful);
     }
 
 	public static Response notRegistered() {
@@ -94,20 +103,36 @@ public class Response {
 	}
 
 	public static Response offers(Set<Offer> offers) {
-		var response = new Response(Status.DoesNotExist);
+		var response = new Response(Status.Successful);
         response.offers = offers;
         return response;
 	}
 
 	public static Response demands(Set<Demand> demands) {
-		var response = new Response(Status.DoesNotExist);
+		var response = new Response(Status.Successful);
         response.demands = demands;
+        return response;
+    }
+    
+    public static Response offer(Offer offer) {
+		var response = new Response(Status.Successful);
+        response.item = offer;
+        return response;
+    }
+    
+    public static Response demand(Demand demand) {
+		var response = new Response(Status.Successful);
+        response.item = demand;
+        return response;
+    }
+
+	public static Response transactions(List<Transaction> transactions) {
+		var response = new Response(Status.Successful);
+        response.transactions = transactions;
         return response;
 	}
 
-	public static Response transactions(List<Transaction> transactions) {
-		var response = new Response(Status.DoesNotExist);
-        response.transactions = transactions;
-        return response;
+	public static Response removed() {
+		return new Response(Status.Successful);
 	}
 }

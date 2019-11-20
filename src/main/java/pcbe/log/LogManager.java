@@ -1,6 +1,7 @@
 package pcbe.log;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
@@ -48,7 +49,7 @@ public final class LogManager {
         public void publish(LogRecord record) {
             var message = name + ": " + record.getMessage() + System.lineSeparator();
             try {
-                Files.write(Paths.get(logFileName), message.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                Files.write(Paths.get(logFileName), message.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             } catch (IOException e) {
                 System.out.println("Could not write to " + logFileName + ". The message was: " + message);
             }

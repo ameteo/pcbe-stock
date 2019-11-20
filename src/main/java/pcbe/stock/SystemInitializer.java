@@ -1,11 +1,14 @@
 package pcbe.stock;
 
 import static java.lang.Math.random;
+import static java.util.stream.Collectors.toCollection;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -52,7 +55,9 @@ public class SystemInitializer {
     }
 
     private static StockClient getRandomClient(Collection<StockClient> clients) {
-        return clients.stream().findAny().get();
+        var view = clients.stream().collect(toCollection(LinkedList::new));
+        Collections.shuffle(view);
+        return view.getFirst();
     }
 
     private static Integer getCurrencyAmount() {

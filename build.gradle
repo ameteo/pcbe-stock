@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'application'
     id 'eclipse'
+    // id "com.github.spotbugs" version "2.0.1"
 }
 
 sourceCompatibility = JavaVersion.VERSION_12
@@ -49,3 +50,10 @@ eclipse.jdt.file.withProperties { props ->
     props['org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures']= 'enabled'
     props['org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures']= 'ignore'
 }
+
+// tasks.withType(com.github.spotbugs.SpotBugsTask) {
+//     reports{
+//         xml.enabled = false
+//         html.enabled = true
+//     }
+// }

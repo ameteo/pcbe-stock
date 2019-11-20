@@ -5,11 +5,13 @@ import static java.util.Collections.synchronizedMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
 import pcbe.stock.client.StockClient;
 import pcbe.stock.model.Response;
+import pcbe.stock.model.StockItem;
 import pcbe.stock.model.StockItem.Offer;
 import pcbe.stock.model.StockItem.Demand;
 
@@ -71,16 +73,57 @@ public class StockServer {
 			? Response.offers(stockService.getOffers())
 			: Response.notRegistered();
 	}
-
+	
 	public Response getDemands(UUID clientId) {
 		return clients.containsKey(clientId)
-			? Response.demands(stockService.getDemands())
+		? Response.demands(stockService.getDemands())
+		: Response.notRegistered();
+	}
+
+	public Response getOfferById(UUID clientId, UUID offerId) {
+		return clients.containsKey(clientId)
+			? tryFindOffer(offerId)
 			: Response.notRegistered();
+	}
+
+	private Response tryFindOffer(UUID offerId) {
+		var foundOffer = stockService.getOffers().stream().filter(withId(offerId)).findAny();
+		return foundOffer.isPresent()
+			? Response.offer(foundOffer.get())
+			: Response.doesNotExist(offerId);
+	}
+	
+	public Response getDemandById(UUID clientId, UUID demandId) {
+		return clients.containsKey(clientId)
+			? tryFindDemand(demandId)
+			: Response.notRegistered();
+	}
+
+	private Response tryFindDemand(UUID demandId) {
+		var foundDemand = stockService.getDemands().stream().filter(withId(demandId)).findAny();
+		return foundDemand.isPresent()
+			? Response.demand(foundDemand.get())
+			: Response.doesNotExist(demandId);
+	}
+
+	private Predicate<StockItem> withId(UUID offerId) {
+		return item -> item.getId().equals(offerId);
 	}
 
 	public Response getTransactionHistory(UUID clientId) {
 		return clients.containsKey(clientId)
 			? Response.transactions(stockService.getTransactions())
 			: Response.notRegistered();
+	}
+
+	public Response removeItem(UUID clientId, UUID itemId) {
+		return clients.containsKey(clientId)
+			? removeItem(itemId)
+			: Response.notRegistered();
+	}
+
+	private Response removeItem(UUID itemId) {
+		stockService.removeItem(itemId);
+		return Response.removed();
 	}
 }
