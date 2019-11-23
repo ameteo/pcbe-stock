@@ -54,4 +54,21 @@ public final class Transaction {
 	public double getPrice() {
 		return price;
 	}
+
+	@Override
+	public String toString() {
+		return "Transaction [" 
+			+ "company=" + company + ", "
+			+ "shares=" + shares  + ", "
+			+ "price=" + price + ", "
+			+ "id=" + prefixOf(id) + ", "
+			+ "demandId=" + prefixOf(demandId) + ", "
+			+ "demandingClientId=" + prefixOf(demandingClientId) + ", "
+			+ "offerId=" + prefixOf(offerId) + ", "
+			+ "offeringClientId=" + prefixOf(offeringClientId) + "]";
+	}
+
+	private static String prefixOf(UUID id) {
+		return id.toString().substring(0, 8);
+	}
 }
