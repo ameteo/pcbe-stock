@@ -104,7 +104,17 @@ public abstract class StockItem {
 
 	@Override
 	public String toString() {
-		return "StockItem [clientId=" + clientId + ", company=" + company + ", id=" + id + ", price=" + price
-				+ ", shares=" + shares + "]";
+		return "StockItem ["
+			+ "type=" + getClass().getSimpleName() + ", "
+			+ "company=" + company + ", "
+			+ "shares=" + shares + ", "
+			+ "price=" + price + ", "
+			+ "id=" + prefixOf(id) + ", "
+			+ "clientId=" + prefixOf(clientId)
+			+ "]";
+	}
+
+	private static String prefixOf(UUID id) {
+		return id.toString().substring(0, 8);
 	}
 }
