@@ -284,7 +284,7 @@ public class StockClient implements Callable<String> {
     private boolean offerIsNotMine(Offer offer) {
         lock.lock();
         try {
-            return this.offer != null && offer.getId().equals(this.offer.getKey()) == false;
+            return this.offer != null ? !offer.getId().equals(this.offer.getKey()) : true;
         } finally {
             lock.unlock();
         }
