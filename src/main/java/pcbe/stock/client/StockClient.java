@@ -32,20 +32,21 @@ public class StockClient implements Callable<String> {
     private StockServer stockServer;
     private double currencyUnits;
     private double restrictedCurrencyUnits;
-
+    
     private Map<String, Integer> ownedShares = new HashMap<>();
     private Map<String, Integer> offeredShares = new HashMap<>();
     private static final double DEFAULT_PRICE = 1;
-
+    
     private Map.Entry<UUID, TimerTask> offer;
     private Map.Entry<UUID, TimerTask> demand;
-
+    
     private final ReentrantLock lock = new ReentrantLock();
-
+    
     private final Logger logger = LogManager.getClientLogger();
-
+    
     private Timer timer;
     private int lifespanSeconds;
+    private long taskDelay;
     private AtomicBoolean stillHaveTime = new AtomicBoolean(true);
     private TimerTask lifespan = new TimerTask() {
         @Override
@@ -62,6 +63,7 @@ public class StockClient implements Callable<String> {
         this.id = requireNonNull(id);
         this.lifespanSeconds = lifespanSeconds;
         timer = new Timer();
+        taskDelay = TimeUnit.SECONDS.toMillis(lifespanSeconds) / 10;
     }
 
     /**
@@ -182,7 +184,7 @@ public class StockClient implements Callable<String> {
             }
         };
 
-        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        timer.schedule(timerTask, taskDelay, taskDelay);
         return timerTask;
     }
 
@@ -202,7 +204,7 @@ public class StockClient implements Callable<String> {
                 }
             }
         };
-        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        timer.schedule(timerTask, taskDelay, taskDelay);
         return timerTask;
     }
 
