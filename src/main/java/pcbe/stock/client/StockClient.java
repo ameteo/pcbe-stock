@@ -175,7 +175,7 @@ public class StockClient implements Callable<String> {
                         lock.lock();
                         try {
                             offer.getValue().cancel();
-                            offer.setValue(createRemoveItemTask(offerId));
+                            offer.setValue(createRemoveOfferTask(offerId));
                         } finally {
                             lock.unlock();
                         }
@@ -188,19 +188,22 @@ public class StockClient implements Callable<String> {
         return timerTask;
     }
 
-    private TimerTask createRemoveItemTask(UUID itemId) {
+    private TimerTask createRemoveOfferTask(UUID offerId) {
         var timerTask = new TimerTask() {
 
             @Override
             public void run() {
-                if(stockServer.removeItem(id, itemId).isSuccessful()) {
-                    lock.lock();
-                    try {
-                        offer.getValue().cancel();
-                        offer = null;
-                    } finally {
-                        lock.unlock();
+                lock.lock();
+                try {
+                    if(offer != null) {
+                        var response = stockServer.removeItem(id, offerId);
+                        if(response.isSuccessful()) {
+                            offer.getValue().cancel();
+                            offer = null;
+                        }
                     }
+                } finally {
+                    lock.unlock();
                 }
             }
         };
@@ -268,7 +271,7 @@ public class StockClient implements Callable<String> {
                         lock.lock();
                         try {
                             demand.getValue().cancel();
-                            demand.setValue(createRemoveItemTask(demandId));
+                            demand.setValue(createRemoveDemandTask(demandId));
                         } finally {
                             lock.unlock();
                         }
@@ -277,7 +280,30 @@ public class StockClient implements Callable<String> {
             }
         };
 
-        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        timer.schedule(timerTask, taskDelay, taskDelay);
+        return timerTask;
+    }
+
+    private TimerTask createRemoveDemandTask(UUID demandId) {
+        var timerTask = new TimerTask() {
+
+            @Override
+            public void run() {
+                lock.lock();
+                try {
+                    if(demand != null) {
+                        var response = stockServer.removeItem(id, demandId);
+                        if(response.isSuccessful()) {
+                            demand.getValue().cancel();
+                            demand = null;
+                        }
+                    }
+                } finally {
+                    lock.unlock();
+                }
+            }
+        };
+        timer.schedule(timerTask, taskDelay, taskDelay);
         return timerTask;
     }
 
