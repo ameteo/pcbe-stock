@@ -260,10 +260,9 @@ public class StockService {
 
     private void logBeforeTransaction(Demand demand, Offer offer, int tradedShares) {
         logger.info(stringFrom(
-            "Making a transaction between:", lineSeparator(),
-            "Demand: ", demand, lineSeparator(),
-            "Offer: ", offer, lineSeparator(),
-            tradedShares, " will be traded."
+            "Making a transaction for ", tradedShares, " between:", lineSeparator(),
+            demand, lineSeparator(),
+            offer
         ));
     }
 
@@ -307,8 +306,8 @@ public class StockService {
     private String getCannotMakeTransactionMessage(Demand demand, Offer offer, String reason) {
         return stringFrom(
             "Trying to make a transaction but ", reason, ".", lineSeparator(),
-            "Demand: ", demand, lineSeparator(),
-            "Offer: ", offer, lineSeparator()
+            demand, lineSeparator(),
+            offer
         );
     }
 
