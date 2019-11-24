@@ -81,8 +81,10 @@ public class StockClient implements Callable<String> {
             if(offer != null) {
                 currencyUnits += calculateCurrencyAmount(transaction);
                 offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares()); 
-                offer.getValue().cancel();
-                offer = null;
+                if(transaction.getOfferId().equals(offer.getKey())) {
+                    offer.getValue().cancel();
+                    offer = null;
+                }
             }
         } finally {
             lock.unlock();
@@ -96,8 +98,10 @@ public class StockClient implements Callable<String> {
             if(demand != null) {
                 restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
                 ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
-                demand.getValue().cancel();
-                demand = null;
+                if(transaction.getDemandId().equals(demand.getKey())) {
+                    demand.getValue().cancel();
+                    demand = null;
+                }
             }
         } finally {
             lock.unlock();
