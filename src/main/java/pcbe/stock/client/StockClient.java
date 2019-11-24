@@ -78,10 +78,12 @@ public class StockClient implements Callable<String> {
         logger.info("notify sale for client " + id + " and transaction " + transaction.getId());
         lock.lock();
         try {
-            currencyUnits += calculateCurrencyAmount(transaction);
-            offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares()); 
-            offer.getValue().cancel();
-            offer = null;
+            if(offer != null) {
+                currencyUnits += calculateCurrencyAmount(transaction);
+                offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares()); 
+                offer.getValue().cancel();
+                offer = null;
+            }
         } finally {
             lock.unlock();
         }
@@ -91,10 +93,12 @@ public class StockClient implements Callable<String> {
         logger.info("notify buy for client " + id + " and transaction " + transaction.getId());
         lock.lock();
         try {
-            restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
-            ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
-            demand.getValue().cancel();
-            demand = null;
+            if(demand != null) {
+                restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
+                ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
+                demand.getValue().cancel();
+                demand = null;
+            }
         } finally {
             lock.unlock();
         }
@@ -174,8 +178,10 @@ public class StockClient implements Callable<String> {
                     if(changeResponse.isSuccessful()) {
                         lock.lock();
                         try {
-                            offer.getValue().cancel();
-                            offer.setValue(createRemoveOfferTask(offerId));
+                            if(offer != null) {
+                                offer.getValue().cancel();
+                                offer.setValue(createRemoveOfferTask(offerId));
+                            }
                         } finally {
                             lock.unlock();
                         }
@@ -270,8 +276,10 @@ public class StockClient implements Callable<String> {
                     if(changeResponse.isSuccessful()) {
                         lock.lock();
                         try {
-                            demand.getValue().cancel();
-                            demand.setValue(createRemoveDemandTask(demandId));
+                            if(demand != null) {
+                                demand.getValue().cancel();
+                                demand.setValue(createRemoveDemandTask(demandId));
+                            }
                         } finally {
                             lock.unlock();
                         }
