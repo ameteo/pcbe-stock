@@ -114,13 +114,13 @@ public class StockServer {
 	}
 
 	public Response removeItem(UUID clientId, UUID itemId) {
-		return clients.containsKey(clientId)
-			? removeItem(itemId)
-			: Response.notRegistered();
+		if (!clients.containsKey(clientId))
+			return Response.notRegistered();
+		try {
+			stockService.removeItem(itemId);
+		} catch (AlreadyInTransactionException e) {
+			return Response.ongoingTransaction();
 	}
-
-	private Response removeItem(UUID itemId) {
-		stockService.removeItem(itemId);
 		return Response.removed();
 	}
 }
