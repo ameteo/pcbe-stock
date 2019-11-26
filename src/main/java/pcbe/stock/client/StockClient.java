@@ -3,6 +3,7 @@ package pcbe.stock.client;
 import static java.util.Objects.nonNull;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
+import static pcbe.UUIDUtil.prefixOf;
 
 import java.util.AbstractMap;
 import java.util.HashMap;
@@ -11,7 +12,6 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
@@ -19,6 +19,7 @@ import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
+import pcbe.stock.Executor;
 import pcbe.stock.model.Notifiers;
 import pcbe.stock.model.Response;
 import pcbe.stock.model.StockItem.Demand;
@@ -62,7 +63,7 @@ public class StockClient implements Callable<String> {
     public StockClient(UUID id, int lifespanSeconds) {
         this.id = requireNonNull(id);
         this.lifespanSeconds = lifespanSeconds;
-        timer = new Timer();
+        timer = Executor.newTimer();
         taskDelay = TimeUnit.SECONDS.toMillis(lifespanSeconds) / 10;
     }
 
@@ -129,7 +130,7 @@ public class StockClient implements Callable<String> {
     }
 
     /**
-     * Client entry point. Will be called by an {@link Executor}
+     * Client entry point. Will be called by an {@link java.util.concurrent.Executor}
      */
     @Override
     public String call() {
@@ -145,7 +146,6 @@ public class StockClient implements Callable<String> {
             offerShares();
             demandShares();
         }
-        timer.cancel();
     }
 
     public void offerShares() {

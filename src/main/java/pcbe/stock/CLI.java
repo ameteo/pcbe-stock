@@ -23,6 +23,7 @@ public class CLI {
         }
         System.out.println("ENTER to stop the program.");
         while (System.in.read() != '\n');
-        executor.shutdownNow();
+        Executor.getDefault().shutdownNow();
+        Executor.cancelTimers();
     }
 }
