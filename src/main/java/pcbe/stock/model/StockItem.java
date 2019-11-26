@@ -1,5 +1,7 @@
 package pcbe.stock.model;
 
+import static pcbe.UUIDUtil.prefixOf;
+
 import java.util.UUID;
 
 public abstract class StockItem {
@@ -73,20 +75,6 @@ public abstract class StockItem {
 		}
 	}
 
-	/**
-	 * Checks if <code>this</code> and <code>other</code> 
-	 * are matching. Two <code>StockItem</code>s match if:
-	 * <ul>
-	 * 	<li>they have a different <code>clientId</code>
-	 * 	<li>they have the same <code>company</code>
-	 * 	<li>they have the same <code>price</code>
-	 * </ul>
-	 */
-	public boolean matches(StockItem other) {
-		return !clientId.equals(other.clientId)
-			&& company.equals(other.company)
-			&& price == other.price;
-	}
 
 	@Override
 	public int hashCode() {
@@ -112,9 +100,5 @@ public abstract class StockItem {
 			+ "id=" + prefixOf(id) + ", "
 			+ "clientId=" + prefixOf(clientId)
 			+ "]";
-	}
-
-	private static String prefixOf(UUID id) {
-		return id.toString().substring(0, 8);
 	}
 }

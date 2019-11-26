@@ -33,8 +33,8 @@ public class SystemInitializer {
 
     private static void provideClientsWithShares(List<String> selectedCompanies, Map<String, Integer> sharesPerCompany, Collection<StockClient> clients) {
         for (var company : selectedCompanies) {
-            var client = getRandomClient(clients);
-            client.addShares(company, sharesPerCompany.get(company));
+            while (Math.random() > .3)
+                getRandomClient(clients).addShares(company, sharesPerCompany.get(company));
         }
     }
 
@@ -65,7 +65,7 @@ public class SystemInitializer {
     }
 
     private static boolean shouldSelectCompany() {
-        return random() > .5;
+        return random() > .3;
     }
 
     private static int getRandomShares() {

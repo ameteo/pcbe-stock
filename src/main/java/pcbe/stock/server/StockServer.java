@@ -1,6 +1,7 @@
 package pcbe.stock.server;
 
 import static java.util.Collections.synchronizedMap;
+import static pcbe.UUIDUtil.prefixOf;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -12,8 +13,6 @@ import pcbe.log.LogManager;
 import pcbe.stock.client.StockClient;
 import pcbe.stock.model.Response;
 import pcbe.stock.model.StockItem;
-import pcbe.stock.model.StockItem.Offer;
-import pcbe.stock.model.StockItem.Demand;
 
 public class StockServer {
 
@@ -26,24 +25,22 @@ public class StockServer {
 			return Response.alreadyRegistered();
 		clients.put(stockClient.getId(), stockClient);
 		stockService.configureNotifiers(stockClient.getId(), stockClient.getNotifiers());
-		logger.info("Client " + stockClient.getId() + " registered successfully.");
+		logger.info("Client " + prefixOf(stockClient.getId()) + " registered successfully.");
 		return Response.registeredSuccessfully();
 	}
 
 	public Response offerShares(UUID clientId, String company, int shares, double price) {
 		if (!clients.containsKey(clientId))
 			return Response.notRegistered();
-		var offer = new Offer(clientId, company, shares, price);
-		stockService.addOffer(offer);
-		return Response.created(offer.getId());
+		var offerId = stockService.addOffer(clientId, company, shares, price);
+		return Response.created(offerId);
 	}
 
 	public Response demandShares(UUID clientId, String company, int shares, double price) {
 		if (!clients.containsKey(clientId))
 			return Response.notRegistered();
-		var demand = new Demand(clientId, company, shares, price);
-		stockService.addDemand(demand);
-		return Response.created(demand.getId());
+		var demandId = stockService.addDemand(clientId, company, shares, price);
+		return Response.created(demandId);
 	}
 
 	public Response changeOffer(UUID clientId, UUID offerId, int newShares, double newPrice) {
@@ -117,13 +114,13 @@ public class StockServer {
 	}
 
 	public Response removeItem(UUID clientId, UUID itemId) {
-		return clients.containsKey(clientId)
-			? removeItem(itemId)
-			: Response.notRegistered();
+		if (!clients.containsKey(clientId))
+			return Response.notRegistered();
+		try {
+			stockService.removeItem(itemId);
+		} catch (AlreadyInTransactionException e) {
+			return Response.ongoingTransaction();
 	}
-
-	private Response removeItem(UUID itemId) {
-		stockService.removeItem(itemId);
 		return Response.removed();
 	}
 }

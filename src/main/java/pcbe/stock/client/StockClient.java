@@ -3,6 +3,7 @@ package pcbe.stock.client;
 import static java.util.Objects.nonNull;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
+import static pcbe.UUIDUtil.prefixOf;
 
 import java.util.AbstractMap;
 import java.util.HashMap;
@@ -11,7 +12,6 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
@@ -19,6 +19,7 @@ import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 import pcbe.log.LogManager;
+import pcbe.stock.Executor;
 import pcbe.stock.model.Notifiers;
 import pcbe.stock.model.Response;
 import pcbe.stock.model.StockItem.Demand;
@@ -32,20 +33,21 @@ public class StockClient implements Callable<String> {
     private StockServer stockServer;
     private double currencyUnits;
     private double restrictedCurrencyUnits;
-
+    
     private Map<String, Integer> ownedShares = new HashMap<>();
     private Map<String, Integer> offeredShares = new HashMap<>();
     private static final double DEFAULT_PRICE = 1;
-
+    
     private Map.Entry<UUID, TimerTask> offer;
     private Map.Entry<UUID, TimerTask> demand;
-
+    
     private final ReentrantLock lock = new ReentrantLock();
-
+    
     private final Logger logger = LogManager.getClientLogger();
-
+    
     private Timer timer;
     private int lifespanSeconds;
+    private long taskDelay;
     private AtomicBoolean stillHaveTime = new AtomicBoolean(true);
     private TimerTask lifespan = new TimerTask() {
         @Override
@@ -61,7 +63,8 @@ public class StockClient implements Callable<String> {
     public StockClient(UUID id, int lifespanSeconds) {
         this.id = requireNonNull(id);
         this.lifespanSeconds = lifespanSeconds;
-        timer = new Timer();
+        timer = Executor.newTimer();
+        taskDelay = TimeUnit.SECONDS.toMillis(lifespanSeconds) / 10;
     }
 
     /**
@@ -73,26 +76,34 @@ public class StockClient implements Callable<String> {
     }
 
     public void notifySale(Transaction transaction) {
-        logger.info("notify sale for client " + id + " and transaction " + transaction.getId());
+        logger.info("notify sale for client " + prefixOf(id) + " and transaction " + prefixOf(transaction.getId()));
         lock.lock();
         try {
-            currencyUnits += calculateCurrencyAmount(transaction);
-            offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares()); 
-            offer.getValue().cancel();
-            offer = null;
+            if(offer != null) {
+                currencyUnits += calculateCurrencyAmount(transaction);
+                offeredShares.compute(transaction.getCompany(), (k, v) -> v - transaction.getShares()); 
+                if(transaction.getOfferId().equals(offer.getKey())) {
+                    offer.getValue().cancel();
+                    offer = null;
+                }
+            }
         } finally {
             lock.unlock();
         }
     }
 
     public void notifyBuy(Transaction transaction) {
-        logger.info("notify buy for client " + id + " and transaction " + transaction.getId());
+        logger.info("notify buy for client " + prefixOf(id) + " and transaction " + prefixOf(transaction.getId()));
         lock.lock();
         try {
-            restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
-            ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
-            demand.getValue().cancel();
-            demand = null;
+            if(demand != null) {
+                restrictedCurrencyUnits -= calculateCurrencyAmount(transaction);
+                ownedShares.compute(transaction.getCompany(), (k, v) -> v + transaction.getShares());
+                if(transaction.getDemandId().equals(demand.getKey())) {
+                    demand.getValue().cancel();
+                    demand = null;
+                }
+            }
         } finally {
             lock.unlock();
         }
@@ -119,7 +130,7 @@ public class StockClient implements Callable<String> {
     }
 
     /**
-     * Client entry point. Will be called by an {@link Executor}
+     * Client entry point. Will be called by an {@link java.util.concurrent.Executor}
      */
     @Override
     public String call() {
@@ -135,7 +146,6 @@ public class StockClient implements Callable<String> {
             offerShares();
             demandShares();
         }
-        timer.cancel();
     }
 
     public void offerShares() {
@@ -172,8 +182,10 @@ public class StockClient implements Callable<String> {
                     if(changeResponse.isSuccessful()) {
                         lock.lock();
                         try {
-                            offer.getValue().cancel();
-                            offer.setValue(createRemoveItemTask(offerId));
+                            if(offer != null) {
+                                offer.getValue().cancel();
+                                offer.setValue(createRemoveOfferTask(offerId));
+                            }
                         } finally {
                             lock.unlock();
                         }
@@ -182,27 +194,30 @@ public class StockClient implements Callable<String> {
             }
         };
 
-        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        timer.schedule(timerTask, taskDelay, taskDelay);
         return timerTask;
     }
 
-    private TimerTask createRemoveItemTask(UUID itemId) {
+    private TimerTask createRemoveOfferTask(UUID offerId) {
         var timerTask = new TimerTask() {
 
             @Override
             public void run() {
-                if(stockServer.removeItem(id, itemId).isSuccessful()) {
-                    lock.lock();
-                    try {
-                        offer.getValue().cancel();
-                        offer = null;
-                    } finally {
-                        lock.unlock();
+                lock.lock();
+                try {
+                    if(offer != null) {
+                        var response = stockServer.removeItem(id, offerId);
+                        if(response.isSuccessful()) {
+                            offer.getValue().cancel();
+                            offer = null;
+                        }
                     }
+                } finally {
+                    lock.unlock();
                 }
             }
         };
-        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        timer.schedule(timerTask, taskDelay, taskDelay);
         return timerTask;
     }
 
@@ -261,28 +276,66 @@ public class StockClient implements Callable<String> {
                 var response = stockServer.getDemandById(id, demandId);
                 if(response.isSuccessful()) {
                     var existentDemand = response.getDemand();
-                    var changeResponse = stockServer.changeDemand(id, demandId, existentDemand.getShares(), existentDemand.getPrice() * 1.5);
-                    if(changeResponse.isSuccessful()) {
-                        lock.lock();
-                        try {
-                            demand.getValue().cancel();
-                            demand.setValue(createRemoveItemTask(demandId));
-                        } finally {
-                            lock.unlock();
+                    lock.lock();
+                    try {
+                        var extraCurrencyNeeded = calculateExtraCurrencyNeeded(existentDemand.getPrice(), existentDemand.getShares());
+                        if(currencyUnits >= extraCurrencyNeeded) {
+                            var changeResponse = stockServer.changeDemand(id, demandId, existentDemand.getShares(), existentDemand.getPrice() * 1.5);
+                            if(changeResponse.isSuccessful()) {
+                                if(demand != null) {
+                                    demand.getValue().cancel();
+                                    demand.setValue(createRemoveDemandTask(demandId));
+                                    currencyUnits -= extraCurrencyNeeded;
+                                    restrictedCurrencyUnits += extraCurrencyNeeded;
+                                }
+                            }
                         }
+                        else {
+                            demand.getValue().cancel();
+                            demand.setValue(createRemoveDemandTask(demandId));
+                        }
+                    } finally {
+                        lock.unlock();
                     }
                 }
             }
+
+            private double calculateExtraCurrencyNeeded(double price, int shares) {
+                return price * shares * 0.5;
+            }
         };
 
-        timer.schedule(timerTask, TimeUnit.SECONDS.toMillis(lifespanSeconds / 10), TimeUnit.SECONDS.toMillis(lifespanSeconds / 10));
+        timer.schedule(timerTask, taskDelay, taskDelay);
+        return timerTask;
+    }
+
+    private TimerTask createRemoveDemandTask(UUID demandId) {
+        var timerTask = new TimerTask() {
+
+            @Override
+            public void run() {
+                lock.lock();
+                try {
+                    if(demand != null) {
+                        var response = stockServer.removeItem(id, demandId);
+                        if(response.isSuccessful()) {
+                            demand.getValue().cancel();
+                            demand = null;
+                        }
+                    }
+                } finally {
+                    lock.unlock();
+                }
+            }
+        };
+        timer.schedule(timerTask, taskDelay, taskDelay);
         return timerTask;
     }
 
     private boolean offerIsNotMine(Offer offer) {
         lock.lock();
         try {
-            return this.offer != null && offer.getId().equals(this.offer.getKey()) == false;
+            return this.offer != null ? !offer.getId().equals(this.offer.getKey()) : true;
         } finally {
             lock.unlock();
         }
@@ -298,7 +351,7 @@ public class StockClient implements Callable<String> {
     }
 
     public void addShares(String company, int numberOfShares) {
-        logger.info(id + " has been provided with " + numberOfShares + " shares of the company " + company);
+        logger.info(prefixOf(id) + " has been provided with " + numberOfShares + " shares of the company " + company);
         lock.lock();
         try {
             ownedShares.compute(company, (k, v) -> v == null ? numberOfShares : v + numberOfShares);
@@ -308,7 +361,7 @@ public class StockClient implements Callable<String> {
     }
 
     public void addCurrencyUnits(Integer currencyUnits) {
-        logger.info(id + " has been provided with " + currencyUnits + " units of currency");
+        logger.info(prefixOf(id) + " has been provided with " + currencyUnits + " units of currency");
         lock.lock();
         try {
             this.currencyUnits += currencyUnits;

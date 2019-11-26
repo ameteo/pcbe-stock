@@ -2,11 +2,14 @@ package pcbe.stock.server;
 
 import static java.lang.System.lineSeparator;
 import static java.util.Collections.unmodifiableList;
+import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.collectingAndThen;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.partitioningBy;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
+import static pcbe.UUIDUtil.prefixOf;
+import static pcbe.stock.server.StockService.StockItemState.*;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -18,11 +21,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
 
@@ -51,7 +56,7 @@ public class StockService {
     private StockService() {}
 
     private final ReadWriteLock lock = new ReentrantReadWriteLock(FAIRNESS);
-    private Map<UUID, Notifiers> clientNotifiers = Collections.synchronizedMap(new HashMap<>());
+    private Map<UUID, Notifiers> clientNotifiers = new ConcurrentHashMap<>();
     private Map<StockItem, StockItemState> stockItems = new HashMap<>();
     private List<Transaction> transactions = new CopyOnWriteArrayList<>();
 
@@ -59,43 +64,101 @@ public class StockService {
         clientNotifiers.put(clientId, notifiers);
     }
 
+    /**
+     * Returns a set of {@link Offer}s that are <code>Waiting</code>.
+     * <p>
+     * The items returned are copies of the items in the <code>stockItems</code> map.
+     * <p>
+     * The returned set is unmodifiable.
+     */
     public Set<Offer> getOffers() {
-        return getItemsAs(Offer.class).stream().map(Offer::new)
+        return getItems(Offer.class, Waiting).stream().map(Offer::new)
                 .collect(collectingAndThen(toSet(), Collections::unmodifiableSet));
     }
 
+    /**
+     * Returns a set of {@link Demand}s that are <code>Waiting</code>.
+     * <p>
+     * The items returned are copies of the items in the <code>stockItems</code> map.
+     * <p>
+     * The returned set is unmodifiable.
+     */
     public Set<Demand> getDemands() {
-        return getItemsAs(Demand.class).stream().map(Demand::new)
+        return getItems(Demand.class, Waiting).stream().map(Demand::new)
                 .collect(collectingAndThen(toSet(), Collections::unmodifiableSet));
     }
 
+    /**
+     * Returns an unmodifiable list of complete {@link Transaction}s.
+     */
     public List<Transaction> getTransactions() {
         return unmodifiableList(transactions);
     }
 
-    public void addDemand(Demand demand) {
+    /**
+     * Creates a new {@link Demand} with the given parameters and adds it to the <code>stockItems</code> map.
+     * <p>
+     * After the {@link Demand} is added, possible transactions will be executed on a separate thread.
+     * @return the id of the created {@link Demand}
+     */
+    public UUID addDemand(UUID clientId, String company, int shares, double price) {
+        var demand = new Demand(clientId, company, shares, price);
         addItem(demand);
+        logger.finest(stringFrom("New demand added: ", demand));
         doTransactionsWithDemand(demand);
+        return demand.getId();
     }
 
-    public void addOffer(Offer offer) {
+    /**
+     * Creates a new {@link Offer} with the given parameters and adds it to the <code>stockItems</code> map.
+     * After the {@link Offer} is added, possible transactions will be executed on a separate thread.
+     * @return the id of the created {@link Offer}
+     */
+    public UUID addOffer(UUID clientId, String company, int shares, double price) {
+        var offer = new Offer(clientId, company, shares, price);
         addItem(offer);
+        logger.finest(stringFrom("New offer added: ", offer));
         doTransactionsWithOffer(offer);
+        return offer.getId();
     }
 
+    /**
+     * Updates the demand with the new parameters if possible.
+     * After the {@link Demand} is changed, possible transactions will be executed on a separate thread.
+     * @throws RuntimeException if a demand with the id <code>demandId</code> does not exist
+     */
     public void changeDemand(UUID demandId, int newShares, double newPrice) {
         var demand = changeItem(demandId, newShares, newPrice);
+        logger.finest(stringFrom("Demand changed: ", demand));
         doTransactionsWithDemand(Demand.class.cast(demand));
     }
 
+    /**
+     * Updates the offer with the new parameters if possible.
+     * After the {@link Offer} is changed, possible transactions will be executed on a separate thread.
+     * @throws RuntimeException if an offer with the id <code>offerId</code> does not exist
+     */
     public void changeOffer(UUID offerId, int newShares, double newPrice) {
         var offer = changeItem(offerId, newShares, newPrice);
+        logger.finest(stringFrom("Offer changed: ", offer));
         doTransactionsWithOffer(Offer.class.cast(offer));
     }
 
+    /**
+     * Starts a task that will try to do transactions with {@link Offer}s that
+     * {@link this#match(Demand, Offer)} with the given {@link Demand}.
+     * <p>
+     * This method does not hold a write lock while iterating over the matching
+     * offers, so the offers and the demand may be modified on a different thread.
+     * <p>
+     * In order to avoid doing transactions with demands or offers that have 0 shares,
+     * each iteration will check that.
+     */
     private void doTransactionsWithDemand(Demand demand) {
         Executor.getDefault().submit(() -> {
             for (Offer offer : getMatchingOffers(demand)) {
+                if (demand.getShares() == 0)
+                    break;
                 if (offer.getShares() == 0)
                     continue;
                 doTransaction(demand, offer);
@@ -105,9 +168,21 @@ public class StockService {
         });
     }
 
+    /**
+     * Starts a task that will try to do transactions with {@link Demand}s that
+     * {@link this#match(Demand, Offer)} with the given {@link Offer}.
+     * <p>
+     * This method does not hold a write lock while iterating over the matching
+     * demands, so the demands and the offer may be modified on a different thread.
+     * <p>
+     * In order to avoid doing transactions with demands or offers that have 0 shares,
+     * each iteration will check that.
+     */
     private void doTransactionsWithOffer(Offer offer) {
         Executor.getDefault().submit(() -> {
             for (Demand demand : getMatchingDemands(offer)) {
+                if (offer.getShares() == 0)
+                    break;
                 if (demand.getShares() == 0)
                     continue;
                 doTransaction(demand, offer);
@@ -117,41 +192,49 @@ public class StockService {
         });
     }
 
+    /**
+     * @return a collection of {@link Demand}s that are <code>Waiting</code>
+     * or in <code>Transaction</code> that match with <code>offer</code>.
+     */
     private Collection<Demand> getMatchingDemands(Offer offer) {
-        return getMatchingItemsAs(offer, Demand.class);
+        return getItems(Demand.class, Waiting, Transaction).stream()
+            .filter(demand -> match(demand, offer))
+            .collect(toList());
     }
 
+    /**
+     * @return a collection of {@link Offers}s that are <code>Waiting</code>
+     * or in <code>Transaction</code> that match with <code>demand</code>.
+     */
     private Collection<Offer> getMatchingOffers(Demand demand) {
-        return getMatchingItemsAs(demand, Offer.class);
+        return getItems(Offer.class, Waiting, Transaction).stream()
+            .filter(offer -> match(demand, offer))
+            .collect(toList());
     }
 
     /**
      * Tries to complete a transaction between <code>demand</code> and
      * <code>offer</code>.
      * <p>
-     * If the transaction cannot be completed because either <code>demand</code> or
-     * <code>offer</code> is in another transaction, this method will return
-     * <code>false</code> and will have no side effects. If the transaction cannot
-     * be completed for other reasons, a <code>RuntimeException</code> will be
-     * thrown.
+     * The transaction cannot be completed if either <code>demand</code> and
+     * <code>offer</code> do not match or they are not in the <code>Waiting</code> state.
+     * Otherwise, <code>demand</code> and <code>offer</code> are put in the <code>Transaction</code>
+     * state and the transaction is done.
+     * <p>
+     * After the transaction is complete, the items with 0 remaining shares are set to <code>Complete</code>
+     * ,the other items are set to <code>Waiting</code> and the clients are notified.
      * <p>
      * If the transaction can be completed, the amount of traded shares is:
      * <p>
      * <b>Math.min(offer.getShares(), demand.getShares())</b>.
      * 
-     * @return <code>true</code> if the transaction was made successfully,
-     *         <code>false</code> otherwise
-     * @throws RuntimeException will be thrown in the followin situations:
-     *                          <ul>
-     *                          <li>if the demand and offer do not match
-     *                          <li>if the demand or offer does not exist
-     *                          </ul>
+     * @throws RuntimeException if <code>demand</code> or <code>offer</code> are not in the <code>stockItems</code> map
      */
     private void doTransaction(Demand demand, Offer offer) {
         if (!makeSureTransactionIsPossibleAndSetStates(demand, offer))
             return;
         var company = demand.getCompany();
-        var price = demand.getPrice();
+        var price = Math.min(offer.getPrice(), demand.getPrice());
         var demandClientId = demand.getClientId();
         var offerClientId = offer.getClientId();
         var tradedShares = Math.min(offer.getShares(), demand.getShares());
@@ -161,80 +244,151 @@ public class StockService {
         var transaction = new Transaction(offerClientId, demandClientId, offer.getId(), demand.getId(), company, tradedShares, price);
         transactions.add(transaction);
         var partition = Stream.of(demand, offer).collect(partitioningBy(item -> item.getShares() == 0));
-        var itemsToRemove = partition.get(true);
-        var itemsToPutToWaiting = partition.get(false);
-        removeItems(itemsToRemove);
-        setItemsStateToWaiting(itemsToPutToWaiting);
+        var completeItems = partition.get(true);
+        var incompleteItems = partition.get(false);
+        setItemsStateToComplete(completeItems);
+        setItemsStateToWaiting(incompleteItems);
         notifyClients(demandClientId, offerClientId, transaction);
         logAfterTransaction(transaction);
-	}
+    }
+    
+    /**
+     * Returns true if:
+     * <ul>
+     *  <li><code>demand</code> and <code>offer</code> have a different <code>clientId</code>
+     *  <li><code>demand</code> and <code>offer</code> have the same <code>company</code>
+     *  <li><code>demand</code> and <code>offer</code> have the same <code>price</code>
+     * </ul>
+     */
+    public boolean match(Demand demand, Offer offer) {
+        return !demand.getClientId().equals(offer.getClientId())
+            && demand.getCompany().equals(offer.getCompany())
+            && demand.getPrice() == offer.getPrice();
+    }
 
+    /**
+     * Aquires the write lock and sets the state of each <code>itemToPutToWaiting</code> to <code>Waiting</code>.
+     * @throws RuntimeException if any of the items are not in <code>Transaction</code>
+     */
     private void setItemsStateToWaiting(List<StockItem> itemsToPutToWaiting) {
         doUnderWriteLock(() -> {
-            itemsToPutToWaiting.forEach(item -> stockItems.put(item, StockItemState.Waiting));
+            if(itemsToPutToWaiting.stream().map(stockItems::get).anyMatch(not(Transaction::equals)))
+                throw new RuntimeException("Only items in transaction can be put back to waiting.");
+            itemsToPutToWaiting.forEach(item -> stockItems.put(item, Waiting));
         });
     }
 
+    /**
+     * Aquries the write lock and sets the state of each <code>itemToComplete</code> to <code>Complete</code>.
+     * @throws RuntimeException if any of the items are not in <code>Transaction</code>
+     */
+    private void setItemsStateToComplete(List<StockItem> itemsToComplete) {
+        doUnderWriteLock(() -> {
+            if(itemsToComplete.stream().map(stockItems::get).anyMatch(not(Transaction::equals)))
+                throw new RuntimeException("Only items in transaction can be completed.");
+            itemsToComplete.forEach(item -> stockItems.put(item, Complete));
+        });
+    }
+
+    /**
+     * Aquires the write lock and sets the state of the item with id <code>itemId</code> to <code>Removed</code>.
+     * <p>
+     * If the item has already been removed or is complete, nothing is done.
+     * 
+     * @param itemId the id of the item
+     * @throws AlreadyInTransactionException if the item with id <code>itemId</code> is in a transaction
+     * @throws RuntimeException if no item in the <code>stockItems</code> map has the id <code>itemId</code>
+     */
     public void removeItem(UUID itemId) {
         doUnderWriteLock(() -> {
-            stockItems.entrySet().stream()
-                .filter(entry -> itemId.equals(entry.getKey().getId())).findAny()
-                .ifPresent(entry -> stockItems.remove(entry.getKey()));
+            var optionalItem = stockItems.entrySet().stream()
+                .filter(entry -> itemId.equals(entry.getKey().getId())).findAny();
+            if (!optionalItem.isPresent())
+                throw new RuntimeException(stringFrom("Cannot remove item ", itemId, " because it does not exist."));
+            var item = optionalItem.get();
+            switch (item.getValue()) {
+                case Transaction:
+                    throw new AlreadyInTransactionException();
+                case Waiting:
+                    stockItems.put(item.getKey(), Removed);
+                    logger.finest(stringFrom("Item removed: ", item.getKey()));
+                    break; 
+                case Removed: case Complete:
+                    logger.fine(stringFrom("Trying to remove item ", itemId, " but item is ", item.getValue()));
+            }
         });
     }
 
-    private void removeItems(List<StockItem> itemsToRemove) {
-        doUnderWriteLock(() -> {
-            itemsToRemove.forEach(stockItems::remove);
-        });
-    }
-
+    /**
+     * Notifies the client with id <code>demandClientId</code> about his sale and client with id <code>offerClientId</code about his buy.
+     */
     private void notifyClients(UUID demandClientId, UUID offerClientId, Transaction transaction) {
         Executor.getDefault().submit(() -> clientNotifiers.get(offerClientId).saleNotifier().accept(transaction));
         Executor.getDefault().submit(() -> clientNotifiers.get(demandClientId).buyNotifier().accept(transaction));
     }
 
+    /**
+     * Aquires the write lock, sets the state of <code>demand</code> and <code>offer</code> to <code>Transaction</code> and returns true.
+     * The states will not be changed and the method will return false if:
+     * <ul>
+     *  <li><code>demand</code> and <code>offer</code> do not match
+     *  <li><code>demand</code> or <code>offer</code> are in a state other than <code>Waiting</code>
+     * </ul>
+     * @throws RuntimeException if <code>demand</code> or <code>offer</code> are not keys of the <code>stockItems</code> map
+     */
     private boolean makeSureTransactionIsPossibleAndSetStates(Demand demand, Offer offer) {
-        if (!demand.matches(offer)) {
-            var message = getCannotMakeTransactionMessage(demand, offer, "demand and offer do not match");
-            logger.warning(message);
-            return false;
-        }
-        return doUnderWriteLock(() -> {
-            if (!stockItems.containsKey(demand)) {
-                var message = getCannotMakeTransactionMessage(demand, offer, "demand does not exist");
-                logger.warning(message);
+        return doUnderWriteLock(() -> {        
+            if (!match(demand, offer)) {
+                logger.fine(getCannotMakeTransactionMessage(demand, offer, "demand and offer do not match"));
                 return false;
             }
-            if (!stockItems.containsKey(offer)) {
-                var message = getCannotMakeTransactionMessage(demand, offer, "offer does not exist");
-                logger.warning(message);
-                return false;
-            }
-            switch(stockItems.get(demand)) {
-                case Transaction:
-                    logger.info(getCannotMakeTransactionMessage(demand, offer, "demand is in another transaction"));
+            if (!stockItems.containsKey(demand))
+                throw new RuntimeException(getCannotMakeTransactionMessage(demand, offer, "demand does not exist"));
+            if (!stockItems.containsKey(offer))
+                throw new RuntimeException(getCannotMakeTransactionMessage(demand, offer, "demand does not exist"));
+            var demandState = stockItems.get(demand);
+            switch(demandState) {
+                case Transaction: case Removed: case Complete:
+                    logger.fine(getCannotMakeTransactionMessage(demand, offer, stringFrom("demand is is ", demandState)));
                     return false;
                 case Waiting: 
                     break;
             };
-            switch(stockItems.get(offer)) {
-                case Transaction:
-                    logger.info(getCannotMakeTransactionMessage(demand, offer, "offer is in another transaction"));
+            var offerState = stockItems.get(offer);
+            switch(offerState) {
+                case Transaction: case Removed: case Complete:
+                    logger.fine(getCannotMakeTransactionMessage(demand, offer, stringFrom("offer is ", offerState)));
                     return false;
                 case Waiting: 
                     break;
             };
-            stockItems.put(demand, StockItemState.Transaction);
-            stockItems.put(offer, StockItemState.Transaction);
+            stockItems.put(demand, Transaction);
+            stockItems.put(offer, Transaction);
             return true;
         });
     }
 
-    private <T extends StockItem> Collection<T> getItemsAs(Class<T> cls) {
+    /**
+     * Aquires the read lock and computes a collection of the items that:
+     * <ul>
+     *  <li>are in a state present in <code>states</code>
+     *  <li>are an instance of <code>cls</code>
+     * </ul>
+     * The objects returned are keys of the <code>stockItems</code> map.
+     * 
+     * @param <T>
+     * @param cls one of
+     * <ul>
+     *  <li><code>Offer.class</code>
+     *  <li><code>Demand.class</code>
+     *  <li><code>StockItem.class</code>
+     * </ul>
+     * @param states 
+     */
+    private <T extends StockItem> Collection<T> getItems(Class<T> cls, StockItemState ... states) {
         return doUnderReadLock(() -> 
             stockItems.entrySet().stream()
-                .filter(x -> x.getValue() == StockItemState.Waiting)
+                .filter(inStates(states))
                 .map(Entry::getKey)
                 .filter(cls::isInstance)
                 .map(cls::cast)
@@ -242,20 +396,12 @@ public class StockService {
         );
     }
 
-    private <T extends StockItem> Collection<T> getMatchingItemsAs(StockItem stockItem, Class<T> cls) {
-        return doUnderReadLock(() -> 
-            stockItems.keySet().stream()
-                .filter(stockItem::matches)
-                .filter(cls::isInstance)
-                .map(cls::cast)
-                .collect(toList())
-        );
+    private Predicate<Entry<StockItem, StockItemState>> inStates(StockItemState ... states) {
+        return entry -> Arrays.stream(states).anyMatch(entry.getValue()::equals);
     }
 
     private void logAfterTransaction(Transaction transaction) {
-        logger.info(stringFrom(
-            "Transaction complete: ", transaction
-        ));
+        logger.info(stringFrom("Transaction complete: ", transaction));
     }
 
     private void logBeforeTransaction(Demand demand, Offer offer, int tradedShares) {
@@ -266,40 +412,55 @@ public class StockService {
         ));
     }
 
+    /**
+     * Aquires the write lock and adds <code>stockItem</code> to the <code>stockItems</code> map.
+     * @throws RuntimeException if the <code>stockItem</code> is already in the <code>stockItems</code> map.
+     */
 	private void addItem(StockItem stockItem) {
         doUnderWriteLock(() -> {
             if (stockItems.containsKey(stockItem)) {
-                var message = stringFrom(
-                    "Trying to add but item with id ", stockItem.getId(), " already exists.", lineSeparator(),
+                throw new RuntimeException(stringFrom(
+                    "Trying to add but item with id ", prefixOf(stockItem.getId()), " already exists.", lineSeparator(),
                     stockItem.getClass().getSimpleName(), ": ", stockItem
-                );
-                logger.severe(message);
-                throw new RuntimeException(message);
+                ));
             }
-            stockItems.put(stockItem, StockItemState.Waiting);
+            stockItems.put(stockItem, Waiting);
         });
     }
 
+    /**
+     * Aquires the write lock and updates the item <code>itemId</code> with a
+     * new number of shares, <code>newShares</code> and a new price per share
+     * <code>newPrice</code>.
+     * <p>
+     * If the item has been removed or is complete, the method will not update the item.
+     * 
+     * @param itemId the id of the item
+     * @param newShares the new number of shares
+     * @param newPrice the new price per share
+     * @throws RuntimeException if no item in <code>stockItems</code> has the id <code>itemId</code>
+     * @throws AlreadyInTransactionException if the item is in another transaction
+     * @return the item with id <code>itemId</code>
+     */
     private StockItem changeItem(UUID itemId, int newShares, double newPrice) {
         return doUnderWriteLock(() -> {
-            var optionalEntry = stockItems.entrySet().stream()
+            var optionalItem = stockItems.entrySet().stream()
                 .filter(e -> e.getKey().getId().equals(itemId))
                 .findFirst();
-            if (optionalEntry.isEmpty()) {
-                var message = stringFrom("Trying to change item with id ", itemId, " but it does not exist");
-                logger.severe(message);
-                throw new RuntimeException();
+            if (optionalItem.isEmpty())
+                throw new RuntimeException(stringFrom("Trying to change item with id ", itemId, " but it does not exist"));
+            var item = optionalItem.get();
+            switch (item.getValue()) {
+                case Transaction:
+                    throw new AlreadyInTransactionException();
+                case Waiting:
+                    item.getKey().setShares(newShares);
+                    item.getKey().setPrice(newPrice);
+                    break;
+                case Removed: case Complete:
+                    logger.fine(stringFrom("Trying to remove item ", itemId, " but item is ", item.getValue()));
             }
-            var entry = optionalEntry.get();
-            if (entry.getValue() == StockItemState.Transaction) {
-                logger.info(stringFrom("Trying to change item with id ", itemId, " but it's currently in a transaction"));
-                throw new AlreadyInTransactionException();
-            } else {
-                var stockItem = entry.getKey();
-                stockItem.setShares(newShares);
-                stockItem.setPrice(newPrice);
-                return stockItem;
-            }
+            return item.getKey();
         });
     }
 
@@ -315,22 +476,40 @@ public class StockService {
         return Arrays.stream(objects).map(Object::toString).collect(joining());
     }
 
+    /**
+     * Executes the given {@link Callable} under <code>lock.readLock</code>
+     * and returns the result.
+     */
     private <T> T doUnderReadLock(Callable<T> action) {
         return doUnderLock(lock.readLock(), action);
     }
 
+    /**
+     * Executes the given {@link Callable} under <code>lock.writeLock</code>
+     * and returns the result.
+     */
     private <T> T doUnderWriteLock(Callable<T> action) {
         return doUnderLock(lock.writeLock(), action);
     }
 
+    /**
+     * Executes the given {@link Runnable} under <code>lock.writeLock</code>.
+     */
     private void doUnderWriteLock(Runnable action) {
         doUnderLock(lock.writeLock(), Executors.callable(action));
     }
 
-    private <T> T doUnderLock(Lock lock, Callable<T> a) {
+    /**
+     * Executes <code>callable</code> after aquiring <code>lock</code> and returns the result.
+     * {@link RuntimeException}s are passed to the caller and {@link Exception}s are wrapped in
+     * a {@link RuntimeException} and rethrown.
+     * <p>
+     * This method will always release the aquired lock.
+     */
+    private <T> T doUnderLock(Lock lock, Callable<T> callable) {
         lock.lock();
         try {
-            return a.call();
+            return callable.call();
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -341,5 +520,30 @@ public class StockService {
         }
     }
 
-    enum StockItemState { Waiting, Transaction }
+    enum StockItemState { 
+        /**
+         * The item can take part in transactions and can be changed.
+         */
+        Waiting,
+        /**
+         * The item is in a transaction.
+         * <p>
+         * It cannot take part in another transaction and cannot be changed.
+         * <p>
+         * An item that is <code>Waiting</code> can 
+         */
+        Transaction,
+        /**
+         * The item has been removed by the client.
+         * <p>
+         * It cannot take part in transactions and cannot be changed.
+         */
+        Removed,
+        /**
+         * The item has been has been 0 shares.
+         * <p>
+         * It cannot take part in transactions and cannot be changed.
+         */
+        Complete 
+    }
 }
