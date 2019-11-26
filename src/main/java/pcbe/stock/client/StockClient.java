@@ -276,19 +276,32 @@ public class StockClient implements Callable<String> {
                 var response = stockServer.getDemandById(id, demandId);
                 if(response.isSuccessful()) {
                     var existentDemand = response.getDemand();
-                    var changeResponse = stockServer.changeDemand(id, demandId, existentDemand.getShares(), existentDemand.getPrice() * 1.5);
-                    if(changeResponse.isSuccessful()) {
-                        lock.lock();
-                        try {
-                            if(demand != null) {
-                                demand.getValue().cancel();
-                                demand.setValue(createRemoveDemandTask(demandId));
+                    lock.lock();
+                    try {
+                        var extraCurrencyNeeded = calculateExtraCurrencyNeeded(existentDemand.getPrice(), existentDemand.getShares());
+                        if(currencyUnits >= extraCurrencyNeeded) {
+                            var changeResponse = stockServer.changeDemand(id, demandId, existentDemand.getShares(), existentDemand.getPrice() * 1.5);
+                            if(changeResponse.isSuccessful()) {
+                                if(demand != null) {
+                                    demand.getValue().cancel();
+                                    demand.setValue(createRemoveDemandTask(demandId));
+                                    currencyUnits -= extraCurrencyNeeded;
+                                    restrictedCurrencyUnits += extraCurrencyNeeded;
+                                }
                             }
-                        } finally {
-                            lock.unlock();
                         }
+                        else {
+                            demand.getValue().cancel();
+                            demand.setValue(createRemoveDemandTask(demandId));
+                        }
+                    } finally {
+                        lock.unlock();
                     }
                 }
+            }
+
+            private double calculateExtraCurrencyNeeded(double price, int shares) {
+                return price * shares * 0.5;
             }
         };
 
