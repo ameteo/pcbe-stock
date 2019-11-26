@@ -73,14 +73,18 @@ public class StockService {
         return unmodifiableList(transactions);
     }
 
-    public void addDemand(Demand demand) {
+    public UUID addDemand(UUID clientId, String company, int shares, double price) {
+        var demand = new Demand(clientId, company, shares, price);
         addItem(demand);
         doTransactionsWithDemand(demand);
+        return demand.getId();
     }
 
-    public void addOffer(Offer offer) {
+    public UUID addOffer(UUID clientId, String company, int shares, double price) {
+        var offer = new Offer(clientId, company, shares, price);
         addItem(offer);
         doTransactionsWithOffer(offer);
+        return offer.getId();
     }
 
     public void changeDemand(UUID demandId, int newShares, double newPrice) {

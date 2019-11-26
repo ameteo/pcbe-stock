@@ -12,8 +12,6 @@ import pcbe.log.LogManager;
 import pcbe.stock.client.StockClient;
 import pcbe.stock.model.Response;
 import pcbe.stock.model.StockItem;
-import pcbe.stock.model.StockItem.Offer;
-import pcbe.stock.model.StockItem.Demand;
 
 public class StockServer {
 
@@ -33,17 +31,15 @@ public class StockServer {
 	public Response offerShares(UUID clientId, String company, int shares, double price) {
 		if (!clients.containsKey(clientId))
 			return Response.notRegistered();
-		var offer = new Offer(clientId, company, shares, price);
-		stockService.addOffer(offer);
-		return Response.created(offer.getId());
+		var offerId = stockService.addOffer(clientId, company, shares, price);
+		return Response.created(offerId);
 	}
 
 	public Response demandShares(UUID clientId, String company, int shares, double price) {
 		if (!clients.containsKey(clientId))
 			return Response.notRegistered();
-		var demand = new Demand(clientId, company, shares, price);
-		stockService.addDemand(demand);
-		return Response.created(demand.getId());
+		var demandId = stockService.addDemand(clientId, company, shares, price);
+		return Response.created(demandId);
 	}
 
 	public Response changeOffer(UUID clientId, UUID offerId, int newShares, double newPrice) {
