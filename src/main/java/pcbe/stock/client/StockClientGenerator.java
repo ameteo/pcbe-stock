@@ -13,6 +13,6 @@ public class StockClientGenerator {
      */
     public static Collection<StockClient> generateClients() {
         return Stream.generate(UUID::randomUUID).limit(new Random().nextInt(5) + 5)
-                .map(id -> new StockClient(id, 5 + new Random().nextInt(15))).collect(toList());
+                .map(id -> new StockClient(id, 15 + new Random().nextInt(5))).collect(toList());
     }
 }

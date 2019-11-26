@@ -351,7 +351,7 @@ public class StockClient implements Callable<String> {
     }
 
     public void addShares(String company, int numberOfShares) {
-        logger.info(id + " has been provided with " + numberOfShares + " shares of the company " + company);
+        logger.info(prefixOf(id) + " has been provided with " + numberOfShares + " shares of the company " + company);
         lock.lock();
         try {
             ownedShares.compute(company, (k, v) -> v == null ? numberOfShares : v + numberOfShares);
@@ -361,7 +361,7 @@ public class StockClient implements Callable<String> {
     }
 
     public void addCurrencyUnits(Integer currencyUnits) {
-        logger.info(id + " has been provided with " + currencyUnits + " units of currency");
+        logger.info(prefixOf(id) + " has been provided with " + currencyUnits + " units of currency");
         lock.lock();
         try {
             this.currencyUnits += currencyUnits;

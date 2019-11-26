@@ -38,7 +38,7 @@ public class CLI {
         var secondBatchOfClients = new ArrayList<StockClient>();
         distributeClientsEvenly(clients, firstBatchOfClients, secondBatchOfClients);
         var firstClientRunner = new ClientRunner(firstBatchOfClients);
-        var secondClientRunner = new ClientRunner(secondBatchOfClients, 10, TimeUnit.SECONDS);
+        var secondClientRunner = new ClientRunner(secondBatchOfClients, 5, TimeUnit.SECONDS);
         List<ClientRunner> of = List.of(firstClientRunner, secondClientRunner);
         return of;
     }
