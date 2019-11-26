@@ -2,11 +2,14 @@ package pcbe.stock.server;
 
 import static java.lang.System.lineSeparator;
 import static java.util.Collections.unmodifiableList;
+import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.collectingAndThen;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.partitioningBy;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
+import static pcbe.UUIDUtil.prefixOf;
+import static pcbe.stock.server.StockService.StockItemState.*;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -18,11 +21,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
 
@@ -51,7 +56,7 @@ public class StockService {
     private StockService() {}
 
     private final ReadWriteLock lock = new ReentrantReadWriteLock(FAIRNESS);
-    private Map<UUID, Notifiers> clientNotifiers = Collections.synchronizedMap(new HashMap<>());
+    private Map<UUID, Notifiers> clientNotifiers = new ConcurrentHashMap<>();
     private Map<StockItem, StockItemState> stockItems = new HashMap<>();
     private List<Transaction> transactions = new CopyOnWriteArrayList<>();
 
@@ -60,12 +65,12 @@ public class StockService {
     }
 
     public Set<Offer> getOffers() {
-        return getItemsAs(Offer.class).stream().map(Offer::new)
+        return getItems(Offer.class, Waiting).stream().map(Offer::new)
                 .collect(collectingAndThen(toSet(), Collections::unmodifiableSet));
     }
 
     public Set<Demand> getDemands() {
-        return getItemsAs(Demand.class).stream().map(Demand::new)
+        return getItems(Demand.class, Waiting).stream().map(Demand::new)
                 .collect(collectingAndThen(toSet(), Collections::unmodifiableSet));
     }
 
@@ -122,11 +127,15 @@ public class StockService {
     }
 
     private Collection<Demand> getMatchingDemands(Offer offer) {
-        return getMatchingItemsAs(offer, Demand.class);
+        return getItems(Demand.class, Waiting, Transaction).stream()
+            .filter(demand -> match(demand, offer))
+            .collect(toList());
     }
 
     private Collection<Offer> getMatchingOffers(Demand demand) {
-        return getMatchingItemsAs(demand, Offer.class);
+        return getItems(Offer.class, Waiting, Transaction).stream()
+            .filter(offer -> match(demand, offer))
+            .collect(toList());
     }
 
     /**
@@ -155,7 +164,7 @@ public class StockService {
         if (!makeSureTransactionIsPossibleAndSetStates(demand, offer))
             return;
         var company = demand.getCompany();
-        var price = demand.getPrice();
+        var price = Math.min(offer.getPrice(), demand.getPrice());
         var demandClientId = demand.getClientId();
         var offerClientId = offer.getClientId();
         var tradedShares = Math.min(offer.getShares(), demand.getShares());
@@ -165,31 +174,50 @@ public class StockService {
         var transaction = new Transaction(offerClientId, demandClientId, offer.getId(), demand.getId(), company, tradedShares, price);
         transactions.add(transaction);
         var partition = Stream.of(demand, offer).collect(partitioningBy(item -> item.getShares() == 0));
-        var itemsToRemove = partition.get(true);
-        var itemsToPutToWaiting = partition.get(false);
-        removeItems(itemsToRemove);
-        setItemsStateToWaiting(itemsToPutToWaiting);
+        var completeItems = partition.get(true);
+        var incompleteItems = partition.get(false);
+        setItemsStateToComplete(completeItems);
+        setItemsStateToWaiting(incompleteItems);
         notifyClients(demandClientId, offerClientId, transaction);
         logAfterTransaction(transaction);
-	}
+    }
+    
+    public boolean match(Demand demand, Offer offer) {
+        return !demand.getClientId().equals(offer.getClientId())
+            && demand.getCompany().equals(offer.getCompany())
+            && demand.getPrice() == offer.getPrice();
+    }
 
     private void setItemsStateToWaiting(List<StockItem> itemsToPutToWaiting) {
         doUnderWriteLock(() -> {
-            itemsToPutToWaiting.forEach(item -> stockItems.put(item, StockItemState.Waiting));
+            itemsToPutToWaiting.forEach(item -> stockItems.put(item, Waiting));
+        });
+    }
+
+    private void setItemsStateToComplete(List<StockItem> itemsToComplete) {
+        doUnderWriteLock(() -> {
+            if(itemsToComplete.stream().map(stockItems::get).anyMatch(not(Transaction::equals)))
+                throw new RuntimeException("Only items in transaction can be completed.");
+            itemsToComplete.forEach(item -> stockItems.put(item, Complete));
         });
     }
 
     public void removeItem(UUID itemId) {
         doUnderWriteLock(() -> {
-            stockItems.entrySet().stream()
-                .filter(entry -> itemId.equals(entry.getKey().getId())).findAny()
-                .ifPresent(entry -> stockItems.remove(entry.getKey()));
-        });
-    }
-
-    private void removeItems(List<StockItem> itemsToRemove) {
-        doUnderWriteLock(() -> {
-            itemsToRemove.forEach(stockItems::remove);
+            var optionalItem = stockItems.entrySet().stream()
+                .filter(entry -> itemId.equals(entry.getKey().getId())).findAny();
+            if (!optionalItem.isPresent())
+                throw new RuntimeException(stringFrom("Cannot remove item ", itemId, " because it does not exist."));
+            var item = optionalItem.get();
+            switch (item.getValue()) {
+                case Transaction:
+                    throw new AlreadyInTransactionException();
+                case Waiting:
+                    stockItems.put(item.getKey(), Removed);
+                    break; 
+                case Removed: case Complete:
+                    logger.fine(stringFrom("Trying to remove item ", itemId, " but item is ", item.getValue()));
+            }
         });
     }
 
@@ -199,46 +227,45 @@ public class StockService {
     }
 
     private boolean makeSureTransactionIsPossibleAndSetStates(Demand demand, Offer offer) {
-        if (!demand.matches(offer)) {
-            var message = getCannotMakeTransactionMessage(demand, offer, "demand and offer do not match");
-            logger.warning(message);
-            return false;
-        }
-        return doUnderWriteLock(() -> {
+        return doUnderWriteLock(() -> {        
+            if (!match(demand, offer)) {
+                logger.info(getCannotMakeTransactionMessage(demand, offer, "demand and offer do not match"));
+                return false;
+            }
             if (!stockItems.containsKey(demand)) {
-                var message = getCannotMakeTransactionMessage(demand, offer, "demand does not exist");
-                logger.warning(message);
+                logger.severe(getCannotMakeTransactionMessage(demand, offer, "demand does not exist"));
                 return false;
             }
             if (!stockItems.containsKey(offer)) {
-                var message = getCannotMakeTransactionMessage(demand, offer, "offer does not exist");
-                logger.warning(message);
+                logger.severe(getCannotMakeTransactionMessage(demand, offer, "offer does not exist"));
                 return false;
             }
-            switch(stockItems.get(demand)) {
-                case Transaction:
-                    logger.info(getCannotMakeTransactionMessage(demand, offer, "demand is in another transaction"));
+            var demandState = stockItems.get(demand);
+            switch(demandState) {
+                case Transaction: case Removed: case Complete:
+                    logger.fine(getCannotMakeTransactionMessage(demand, offer, stringFrom("demand is is ", demandState)));
                     return false;
                 case Waiting: 
                     break;
             };
-            switch(stockItems.get(offer)) {
-                case Transaction:
-                    logger.info(getCannotMakeTransactionMessage(demand, offer, "offer is in another transaction"));
+            var offerState = stockItems.get(offer);
+            switch(offerState) {
+                case Transaction: case Removed: case Complete:
+                    logger.fine(getCannotMakeTransactionMessage(demand, offer, stringFrom("offer is ", offerState)));
                     return false;
                 case Waiting: 
                     break;
             };
-            stockItems.put(demand, StockItemState.Transaction);
-            stockItems.put(offer, StockItemState.Transaction);
+            stockItems.put(demand, Transaction);
+            stockItems.put(offer, Transaction);
             return true;
         });
     }
 
-    private <T extends StockItem> Collection<T> getItemsAs(Class<T> cls) {
+    private <T extends StockItem> Collection<T> getItems(Class<T> cls, StockItemState ... states) {
         return doUnderReadLock(() -> 
             stockItems.entrySet().stream()
-                .filter(x -> x.getValue() == StockItemState.Waiting)
+                .filter(inStates(states))
                 .map(Entry::getKey)
                 .filter(cls::isInstance)
                 .map(cls::cast)
@@ -246,20 +273,12 @@ public class StockService {
         );
     }
 
-    private <T extends StockItem> Collection<T> getMatchingItemsAs(StockItem stockItem, Class<T> cls) {
-        return doUnderReadLock(() -> 
-            stockItems.keySet().stream()
-                .filter(stockItem::matches)
-                .filter(cls::isInstance)
-                .map(cls::cast)
-                .collect(toList())
-        );
+    private Predicate<Entry<StockItem, StockItemState>> inStates(StockItemState ... states) {
+        return entry -> Arrays.stream(states).anyMatch(entry.getValue()::equals);
     }
 
     private void logAfterTransaction(Transaction transaction) {
-        logger.info(stringFrom(
-            "Transaction complete: ", transaction
-        ));
+        logger.info(stringFrom("Transaction complete: ", transaction));
     }
 
     private void logBeforeTransaction(Demand demand, Offer offer, int tradedShares) {
@@ -273,37 +292,34 @@ public class StockService {
 	private void addItem(StockItem stockItem) {
         doUnderWriteLock(() -> {
             if (stockItems.containsKey(stockItem)) {
-                var message = stringFrom(
-                    "Trying to add but item with id ", stockItem.getId(), " already exists.", lineSeparator(),
+                throw new RuntimeException(stringFrom(
+                    "Trying to add but item with id ", prefixOf(stockItem.getId()), " already exists.", lineSeparator(),
                     stockItem.getClass().getSimpleName(), ": ", stockItem
-                );
-                logger.severe(message);
-                throw new RuntimeException(message);
+                ));
             }
-            stockItems.put(stockItem, StockItemState.Waiting);
+            stockItems.put(stockItem, Waiting);
         });
     }
 
     private StockItem changeItem(UUID itemId, int newShares, double newPrice) {
         return doUnderWriteLock(() -> {
-            var optionalEntry = stockItems.entrySet().stream()
+            var optionalItem = stockItems.entrySet().stream()
                 .filter(e -> e.getKey().getId().equals(itemId))
                 .findFirst();
-            if (optionalEntry.isEmpty()) {
-                var message = stringFrom("Trying to change item with id ", itemId, " but it does not exist");
-                logger.severe(message);
-                throw new RuntimeException();
+            if (optionalItem.isEmpty())
+                throw new RuntimeException(stringFrom("Trying to change item with id ", itemId, " but it does not exist"));
+            var item = optionalItem.get();
+            switch (item.getValue()) {
+                case Transaction:
+                    throw new AlreadyInTransactionException();
+                case Waiting:
+                    item.getKey().setShares(newShares);
+                    item.getKey().setPrice(newPrice);
+                    break;
+                case Removed: case Complete:
+                    logger.fine(stringFrom("Trying to remove item ", itemId, " but item is ", item.getValue()));
             }
-            var entry = optionalEntry.get();
-            if (entry.getValue() == StockItemState.Transaction) {
-                logger.info(stringFrom("Trying to change item with id ", itemId, " but it's currently in a transaction"));
-                throw new AlreadyInTransactionException();
-            } else {
-                var stockItem = entry.getKey();
-                stockItem.setShares(newShares);
-                stockItem.setPrice(newPrice);
-                return stockItem;
-            }
+            return item.getKey();
         });
     }
 
@@ -345,5 +361,5 @@ public class StockService {
         }
     }
 
-    enum StockItemState { Waiting, Transaction }
+    enum StockItemState { Waiting, Transaction, Removed, Complete }
 }

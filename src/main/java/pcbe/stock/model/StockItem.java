@@ -75,20 +75,6 @@ public abstract class StockItem {
 		}
 	}
 
-	/**
-	 * Checks if <code>this</code> and <code>other</code> 
-	 * are matching. Two <code>StockItem</code>s match if:
-	 * <ul>
-	 * 	<li>they have a different <code>clientId</code>
-	 * 	<li>they have the same <code>company</code>
-	 * 	<li>they have the same <code>price</code>
-	 * </ul>
-	 */
-	public boolean matches(StockItem other) {
-		return !clientId.equals(other.clientId)
-			&& company.equals(other.company)
-			&& price == other.price;
-	}
 
 	@Override
 	public int hashCode() {
