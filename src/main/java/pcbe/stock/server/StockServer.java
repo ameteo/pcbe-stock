@@ -1,6 +1,7 @@
 package pcbe.stock.server;
 
 import static java.util.Collections.synchronizedMap;
+import static pcbe.UUIDUtil.prefixOf;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -24,7 +25,7 @@ public class StockServer {
 			return Response.alreadyRegistered();
 		clients.put(stockClient.getId(), stockClient);
 		stockService.configureNotifiers(stockClient.getId(), stockClient.getNotifiers());
-		logger.info("Client " + stockClient.getId() + " registered successfully.");
+		logger.info("Client " + prefixOf(stockClient.getId()) + " registered successfully.");
 		return Response.registeredSuccessfully();
 	}
 

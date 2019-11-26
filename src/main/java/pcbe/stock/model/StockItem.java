@@ -1,5 +1,7 @@
 package pcbe.stock.model;
 
+import static pcbe.UUIDUtil.prefixOf;
+
 import java.util.UUID;
 
 public abstract class StockItem {
@@ -112,9 +114,5 @@ public abstract class StockItem {
 			+ "id=" + prefixOf(id) + ", "
 			+ "clientId=" + prefixOf(clientId)
 			+ "]";
-	}
-
-	private static String prefixOf(UUID id) {
-		return id.toString().substring(0, 8);
 	}
 }

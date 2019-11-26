@@ -75,7 +75,7 @@ public class StockClient implements Callable<String> {
     }
 
     public void notifySale(Transaction transaction) {
-        logger.info("notify sale for client " + id + " and transaction " + transaction.getId());
+        logger.info("notify sale for client " + prefixOf(id) + " and transaction " + prefixOf(transaction.getId()));
         lock.lock();
         try {
             if(offer != null) {
@@ -92,7 +92,7 @@ public class StockClient implements Callable<String> {
     }
 
     public void notifyBuy(Transaction transaction) {
-        logger.info("notify buy for client " + id + " and transaction " + transaction.getId());
+        logger.info("notify buy for client " + prefixOf(id) + " and transaction " + prefixOf(transaction.getId()));
         lock.lock();
         try {
             if(demand != null) {
